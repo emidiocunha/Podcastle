@@ -325,6 +325,7 @@ struct MainView: View {
             
         }
         .onChange(of: scenePhase) { newScenePhase in
+            // TODO: Investigate how to change this to not hide the player
             switch newScenePhase {
             case .active:
                 var transaction = Transaction()
