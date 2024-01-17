@@ -30,18 +30,28 @@ class ImageCache {
                 if let local = URL(string:localUrl(url)) {
                     if FileManager().fileExists(atPath:local.path()) {
                         do {
+                            let data = try Data(contentsOf: local)
                             let img = try UIImage(data: Data(contentsOf: local))
                             
                             if let img = img {
-                                let image = Image(uiImage:img)
-                                
-                                cache[url] = image
-                                color[url] = img.averageColor?.darker() ?? UIColor.black
-                                
-                                #if DEBUG
-                                print("Loading cached image: \(url)")
-                                #endif
-                                return image
+                                if img.isAllWhite() {
+                                    #if DEBUG
+                                    print("Detected invalid Image \(url)")
+                                    // Invalid reload
+                                    #endif
+                                    try FileManager().removeItem(at: local)
+                                    return nil
+                                } else {
+                                    let image = Image(uiImage:img)
+                                    
+                                    cache[url] = image
+                                    color[url] = img.averageColor?.darker() ?? UIColor.black
+                                    
+#if DEBUG
+                                    print("Loading cached image: \(url)")
+#endif
+                                    return image
+                                }
                             }
                         }
                         catch let error {
@@ -164,6 +174,7 @@ struct AsyncImageView: View {
             .cornerRadius(4)
             .frame(maxWidth: logo ? 32 : width)
             .clipped()
+            
     }
     
     func cacheAndRender(_ image: Image) -> Image {
@@ -207,6 +218,56 @@ extension UIImage {
                        green: CGFloat(bitmap[1]) / 255,
                        blue: CGFloat(bitmap[2]) / 255,
                        alpha: CGFloat(bitmap[3]) / 255)
+    }
+    
+    func isAllWhite() -> Bool {
+        guard let cgImage = self.cgImage else {
+            return false // Return false for images with no underlying CGImage
+        }
+        
+        let width = cgImage.width
+        let height = cgImage.height
+        
+        let bytesPerPixel = 4 // RGBA
+        let bytesPerRow = bytesPerPixel * width
+        let bitsPerComponent = 8
+        
+        let pixelData = UnsafeMutablePointer<UInt8>.allocate(capacity: bytesPerRow * height)
+        defer {
+            pixelData.deallocate()
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = CGContext(
+            data: pixelData,
+            width: width,
+            height: height,
+            bitsPerComponent: bitsPerComponent,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        
+        context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var x = 0
+        var incX:Int = width / height
+        
+        for y in 0..<height {
+            let offset = (y * bytesPerRow) + (x * bytesPerPixel)
+            let red = pixelData[offset]
+            let green = pixelData[offset + 1]
+            let blue = pixelData[offset + 2]
+            let alpha = pixelData[offset + 3]
+            
+            if red != 255 || green != 255 || blue != 255 || alpha != 255 {
+                return false // If any non-white or non-opaque pixel is found, the image is not all-white
+            }
+            
+            x = x + incX
+        }
+        
+        return true // All pixels are white and opaque, so the image is considered all-white
     }
 }
 

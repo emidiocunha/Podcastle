@@ -8,6 +8,7 @@
 import SwiftUI
 import Foundation
 import BackgroundTasks
+import StoreKit
 
 struct PodcastItemView: View {
     var item:Podcast
@@ -56,11 +57,15 @@ struct PodcastItemView: View {
     }
     
     func changeTo() {
-        if player.isPlaying {
+        let p = player.isPlaying
+        if p {
             player.pause()
         }
         if player.currentPodcast != item {
             _ = player.setPodcast(item)
+        }
+        if !p {
+            player.play()
         }
     }
 }
@@ -334,6 +339,11 @@ struct MainView: View {
                     showingPlayer = true
                 }
                 Subscriptions.shared.load()
+                if Subscriptions.shared.feed.count > 2 {
+                    if let scene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene {
+                        SKStoreReviewController.requestReview(in: scene)
+                    }
+                }
                 break;
             case .inactive:
                 var transaction = Transaction()

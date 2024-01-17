@@ -183,19 +183,30 @@ struct SearchView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .searchable(text: $searchText, prompt:"Search for Podcasts")
                 .onSubmit(of: .search) {
-                    directory.fetchPodcasts(searchTerm: searchText) { (podcasts, error) in
-                        if let error = error {
-                            print("Error: \(error)")
-                            return
+                    if startsWithValidURL(string:searchText) {
+                        directory.fetchPodcasts(urlString: searchText) { (podcasts, error) in
+                            if let first = podcasts?.first {
+                                Subscriptions.shared.addPodcast(first)
+                                changes = changes + 1
+                                dismissSearch()
+                                dismiss()
+                            }
                         }
-                        if let podcasts = podcasts {
-                            results = podcasts
-                        } else {
-                            print("No podcasts found.")
+                    } else {
+                        directory.fetchPodcasts(searchTerm: searchText) { (podcasts, error) in
+                            if let error = error {
+                                print("Error: \(error)")
+                                return
+                            }
+                            if let podcasts = podcasts {
+                                results = podcasts
+                            } else {
+                                print("No podcasts found.")
+                            }
                         }
+                        dismissSearch()
+                        top = false
                     }
-                    dismissSearch()
-                    top = false
                 }
                 .onAppear {
                     top = true
@@ -230,6 +241,15 @@ struct SearchView: View {
                     Button("OK", role: .cancel) { loadingIAP = false }
                 }
         }
+    }
+    
+    func startsWithValidURL(string: String) -> Bool {
+        if let url = URL(string: string), let scheme = url.scheme, let host = url.host {
+            // Check if the string starts with a valid URL scheme and host
+            return string.hasPrefix("\(scheme)://\(host)")
+        }
+        
+        return false
     }
 }
 

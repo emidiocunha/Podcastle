@@ -100,6 +100,14 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
         Task { await refresh() }
     }
     
+    // Directly add a podcast from URL to feed
+    func addPodcast(_ podcast:String) {
+        let p = PodcastDirectoryEntry(id: UInt64.max, name: "", artistName: "", feedUrl: podcast, artworkUrl: "")
+        podcasts?.append(p)
+        sync()
+        Task { await refresh() }
+    }
+    
     func removePodcast(_ podcast:PodcastDirectoryEntry) {
         if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let fullPath = documents.appendingPathComponent(podcast.fileName(), isDirectory: false)
@@ -123,9 +131,9 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
                     
                     if let i = feed.firstIndex(where: {$0.id == podcastEpisode.id }) {
                         feed.remove(at: i)
+                        workFeed.remove(at: i)
                     }
                 }
-                
                 podcasts?.removeAll(where: { $0.id == podcast.id })
                 print("Removing Podcast with ID: \(podcast.id)")
                 sync()
@@ -174,6 +182,27 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
     
     func find(podcastId:UInt64) -> PodcastDirectoryEntry? {
         return (podcasts?.first(where: {$0.id == podcastId}))
+    }
+    
+    // Will check an array with otherEpisodes and returns
+    // the index where it was found, with the Bool indicating
+    // if it's the root element
+    func exists(_ array:[Podcast], item:Podcast) -> (Int, Bool) {
+        for index in 0..<array.count {
+            let p = array[index]
+            
+            if p.audioUrl == item.audioUrl {
+                return (index, false)
+            } else {
+                if let s = p.otherEpisodes {
+                    if let i = s.first(where: {$0.audioUrl == item.audioUrl}) {
+                        return (index, true)
+                    }
+                }
+            }
+        }
+        
+        return (-1, true)
     }
     
     func deletePodcastEpisode(_ podcast:Podcast) {
@@ -285,7 +314,7 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
     }
     
     func refresh() async {
-        workFeed.removeAll(keepingCapacity: true)
+        //workFeed.removeAll(keepingCapacity: true)
         if let podcasts = podcasts, podcasts.count > 0 {
             downloadCount = podcasts.count
             for p in podcasts {
@@ -323,12 +352,19 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
             var t = workFeed
     
             w.forEach { item in
-                if !t.contains(where: {$0.id == item.id}) {
-                    t.append(item)
+                let (i, root) = exists(workFeed, item: item)
+                
+                if i >= 0 {
+                    t.remove(at: i)
+                }
+                
+                t.append(item)
+                
+                /*if !t.contains(where: {$0.id == item.id}) {
                     newFeedItems.append(item)
                     i = i + 1
                     //checkForVideos(item)
-                }
+                }*/
             }
             
             t.sort(by: {$0.date.compare($1.date) == .orderedDescending})
@@ -339,6 +375,10 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
             
             if downloadCount == 0 {
                 //Config.shared.setLastUpdate(Date())
+                if let i = workFeed.firstIndex(where: {$0.audioUrl == "eof"}) {
+                    workFeed.remove(at: i)
+                }
+                
                 var p = Podcast()
                 p.audioUrl = "eof"
                 workFeed.append(p)

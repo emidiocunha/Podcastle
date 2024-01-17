@@ -163,4 +163,31 @@ struct PodcastDirectorySearch {
             
         }
     }
+    
+    // Function to fetch podcast data
+    func fetchPodcasts(urlString: String, completion: @escaping ([PodcastDirectoryEntry]?, Error?) -> Void) {
+        Downloads.shared.downloadTempFile(urlString) { url, error in
+            // Ensure response has data
+            guard let url = url,
+                  error == nil else {
+                completion(nil, error)
+                return
+            }
+            
+            let parser = PodcastParser()
+            parser.parseRSSFeed(url:url, artwork: "", nest:false) { items in
+                var podcasts: [PodcastDirectoryEntry] = []
+                
+                if items.count > 0 {
+                    if let first = items.first {
+                        let podcast = PodcastDirectoryEntry(id: UInt64.max, name: first.title, artistName: first.author, feedUrl: urlString, artworkUrl: first.artworkUrl)
+                        podcasts.append(podcast)
+                    }
+                    completion(podcasts, nil)
+                } else {
+                    completion(nil, nil)
+                }
+            }
+        }
+    }
 }

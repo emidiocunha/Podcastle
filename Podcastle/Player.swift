@@ -179,6 +179,18 @@ class PodcastPlayer : NSObject, ObservableObject {
         // Get the shared MPRemoteCommandCenter
         let commandCenter = MPRemoteCommandCenter.shared()
 
+        // Add wired playpase command
+        commandCenter.togglePlayPauseCommand.isEnabled = true
+        commandCenter.togglePlayPauseCommand.addTarget { [unowned self] event in
+            if self.audioPlayer.rate == 0.0 {
+                self.play()
+                return .success
+            } else {
+                self.pause()
+                return .success
+            }
+        }
+        
         // Add handler for Play Command
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [unowned self] event in
