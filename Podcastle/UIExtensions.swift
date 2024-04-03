@@ -56,3 +56,35 @@ extension UIColor {
         return makeColor(componentDelta: -1*componentDelta)
     }
 }
+
+extension String {
+    func removingHTMLTagsAndDecodingEntities() -> String {
+        // Remove HTML tags
+        let regexPattern = "<.*?>"
+        let regex = try? NSRegularExpression(pattern: regexPattern, options: .caseInsensitive)
+        let range = NSRange(location: 0, length: self.utf16.count)
+        let htmlLessString = regex?.stringByReplacingMatches(in: self, options: [], range: range, withTemplate: "") ?? self
+        
+        // Decode common HTML entities
+        var decodedString = htmlLessString
+        let htmlEntities: [String: String] = [
+            "&quot;": "\"",
+            "&apos;": "'",
+            "&amp;": "&",
+            "&lt;": "<",
+            "&gt;": ">",
+            "&nbsp;": "\u{00a0}",
+            "&copy;": "\u{00a9}",
+            "&reg;": "\u{00ae}",
+            "&euro;": "\u{20ac}",
+            "&pound;": "\u{00a3}",
+            "&yen;": "\u{00a5}"
+        ]
+        
+        for (entity, replacement) in htmlEntities {
+            decodedString = decodedString.replacingOccurrences(of: entity, with: replacement)
+        }
+        
+        return decodedString
+    }
+}

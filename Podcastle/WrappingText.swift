@@ -73,6 +73,9 @@ struct WrappingText: UIViewRepresentable {
         self.autocorrectionType = autocorrectionType
         self.autocapitalizationType = autocapitalizationType
         self.textView = UITextView(frame: .zero)
+        
+        self.textView?.isScrollEnabled = false
+        self.textView?.isUserInteractionEnabled = false
     }
     
     func makeUIView(context: Context) -> UITextView {

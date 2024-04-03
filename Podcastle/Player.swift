@@ -326,16 +326,16 @@ class PodcastPlayer : NSObject, ObservableObject {
     }
     
     func pause() {
-        do {
-            try AVAudioSession.sharedInstance().setActive(false)
-        } catch {
-            print(error)
-        }
         audioPlayer.pause()
         isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         NotificationCenter.default.removeObserver(self)
         Subscriptions.shared.syncNotes()
+        do {
+            try AVAudioSession.sharedInstance().setActive(false)
+        } catch {
+            print(error)
+        }
     }
     
     func prettyPrintSeconds(_ seconds:Double) -> String {

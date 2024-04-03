@@ -14,6 +14,7 @@ struct PodcastItemView: View {
     var item:Podcast
     @EnvironmentObject var player:PodcastPlayer
     @State var showTranscriberAlert:Bool = false
+    @State private var height: CGFloat?
     
     var body: some View {
         VStack(alignment: .leading) {
@@ -30,9 +31,10 @@ struct PodcastItemView: View {
             else {
                 Text("\(item.title)").font(.title2)
             }
-            Text("\(item.summary)").frame(maxWidth: .infinity, alignment: .topLeading)
+            Text("\(item.summary.removingHTMLTagsAndDecodingEntities())").frame(maxWidth: .infinity , alignment:.topLeading)
                 .lineLimit(4)
                 .multilineTextAlignment(.leading)
+
             Spacer()
             Text("\(item.link)").font(.footnote).foregroundColor(Color.gray)
         }
