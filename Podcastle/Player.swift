@@ -7,6 +7,7 @@
 
 import Foundation
 import AVKit
+import AVFoundation
 import MediaPlayer
 import Speech
 import NaturalLanguage
@@ -40,6 +41,7 @@ class PodcastPlayer : NSObject, ObservableObject {
                     Transcriber.shared.load(currentPodcast!) //URL(string:currentPodcast!.localAudioUrl)!)
                 }
                 startPlaying()
+                setupRemoteTransportControls()
             }
             //Transcriber.shared.reset()
         }
@@ -69,6 +71,7 @@ class PodcastPlayer : NSObject, ObservableObject {
         UserDefaults.standard.set(podcast.id, forKey: "currentPodcast")
         Transcriber.shared.reset()
         Transcriber.shared.load(podcast) //URL(string:podcast.localAudioUrl)!)
+        extractChapters(from:podcast)
         return true
     }
     
@@ -182,13 +185,12 @@ class PodcastPlayer : NSObject, ObservableObject {
         // Add wired playpase command
         commandCenter.togglePlayPauseCommand.isEnabled = true
         commandCenter.togglePlayPauseCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 0.0 {
-                self.play()
-                return .success
-            } else {
+            if audioPlayer.rate != 0 {
                 self.pause()
-                return .success
+            } else {
+                self.play()
             }
+            return .success
         }
         
         // Add handler for Play Command
@@ -313,7 +315,6 @@ class PodcastPlayer : NSObject, ObservableObject {
             audioPlayer.rate = lastRate
             audioPlayer.play()
             addPeriodicTimeObserver()
-            setupRemoteTransportControls()
             setupNowPlaying()
             isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
             MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
@@ -345,6 +346,37 @@ class PodcastPlayer : NSObject, ObservableObject {
         
         ret.append(String(format:"%02d:%02d", minutes, sec))
         return ret
+    }
+    
+    func extractChapters(from podcast: Podcast) {
+        let asset = AVAsset(url: URL(string: podcast.localAudioUrl)!)
+        
+        // Accessing metadata
+        let metadata = asset.commonMetadata + asset.metadata
+        
+        for item in metadata {
+           if let value = item.value {
+              switch item.commonKey?.rawValue {
+              default:
+                  print("\(value)")
+                 break
+              }
+           }
+        }
+        
+        // Filter for ID3 metadata potentially containing chapter info
+        /*
+        let id3Metadata = metadata.filter { $0.commonKey ==  }
+        
+        for item in id3Metadata {
+            // Assuming chapters might be encoded in the 'comment' field or similar
+            if let key = item.key as? String, key == "COMM" || key == "chapters" {
+                if let value = item.value {
+                    print("Chapter Info: \(value)")
+                    // Further parsing might be required here depending on how chapters are encoded
+                }
+            }
+        }*/
     }
     
     func detectLanguage() -> String {
