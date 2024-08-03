@@ -19,6 +19,8 @@
 		B851437D2A3C776C003ED322 /* Subscriptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B851437C2A3C776C003ED322 /* Subscriptions.swift */; };
 		B851437F2A3D0083003ED322 /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B851437E2A3D0083003ED322 /* SearchView.swift */; };
 		B85143812A3D011B003ED322 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85143802A3D011B003ED322 /* PlayerView.swift */; };
+		B86906D92C5A4E9100343237 /* ID3.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86906D82C5A4E9100343237 /* ID3.swift */; };
+		B86906DB2C5E33B800343237 /* PodcastFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B86906DA2C5E33B800343237 /* PodcastFile.swift */; };
 		B87E48BB2A7130B9002D1E95 /* WrappingText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87E48BA2A7130B9002D1E95 /* WrappingText.swift */; };
 		B87E48BD2A72E32B002D1E95 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = B87E48BC2A72E32B002D1E95 /* Transcriber.swift */; };
 		B8AF8D5B2ADEAD20008E7974 /* sampletranscript.json in Resources */ = {isa = PBXBuildFile; fileRef = B8AF8D5A2ADEAD20008E7974 /* sampletranscript.json */; };
@@ -47,6 +49,8 @@
 		B851437C2A3C776C003ED322 /* Subscriptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Subscriptions.swift; sourceTree = "<group>"; };
 		B851437E2A3D0083003ED322 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
 		B85143802A3D011B003ED322 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
+		B86906D82C5A4E9100343237 /* ID3.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ID3.swift; sourceTree = "<group>"; };
+		B86906DA2C5E33B800343237 /* PodcastFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastFile.swift; sourceTree = "<group>"; };
 		B87E48BA2A7130B9002D1E95 /* WrappingText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappingText.swift; sourceTree = "<group>"; };
 		B87E48BC2A72E32B002D1E95 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
 		B8AF8D5A2ADEAD20008E7974 /* sampletranscript.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = sampletranscript.json; sourceTree = "<group>"; };
@@ -100,6 +104,7 @@
 				B851437E2A3D0083003ED322 /* SearchView.swift */,
 				B8B616752B0CB3EC00297170 /* ManagePodcastsView.swift */,
 				B85143792A3A2FE9003ED322 /* Player.swift */,
+				B86906DA2C5E33B800343237 /* PodcastFile.swift */,
 				B8B6166F2AFEAC9900297170 /* Print.swift */,
 				B87E48BC2A72E32B002D1E95 /* Transcriber.swift */,
 				B8CC51412A4C0ACE0020F9CA /* Downloads.swift */,
@@ -110,6 +115,7 @@
 				B8AF8D5C2AE6D71A008E7974 /* PodcastDirectory.swift */,
 				B851437C2A3C776C003ED322 /* Subscriptions.swift */,
 				B8B616732B0B62B400297170 /* InAppPurchase.swift */,
+				B86906D82C5A4E9100343237 /* ID3.swift */,
 				B851436B2A3116B1003ED322 /* Assets.xcassets */,
 				B851436D2A3116B1003ED322 /* Preview Content */,
 			);
@@ -200,10 +206,12 @@
 				B8CC51422A4C0ACE0020F9CA /* Downloads.swift in Sources */,
 				B8AF8D5D2AE6D71A008E7974 /* PodcastDirectory.swift in Sources */,
 				B87E48BD2A72E32B002D1E95 /* Transcriber.swift in Sources */,
+				B86906DB2C5E33B800343237 /* PodcastFile.swift in Sources */,
 				B8B616702AFEAC9900297170 /* Print.swift in Sources */,
 				B8B616742B0B62B400297170 /* InAppPurchase.swift in Sources */,
 				B8B6166E2AFD537B00297170 /* LogView.swift in Sources */,
 				B8B616762B0CB3EC00297170 /* ManagePodcastsView.swift in Sources */,
+				B86906D92C5A4E9100343237 /* ID3.swift in Sources */,
 				B82725C72A8117EA00F01ABE /* UIExtensions.swift in Sources */,
 				B87E48BB2A7130B9002D1E95 /* WrappingText.swift in Sources */,
 				B851436A2A3116B0003ED322 /* MainView.swift in Sources */,
@@ -344,7 +352,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				DEVELOPMENT_TEAM = 678732K22X;
 				ENABLE_PREVIEWS = YES;
@@ -362,7 +370,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.3.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -382,7 +390,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				DEVELOPMENT_TEAM = 678732K22X;
 				ENABLE_PREVIEWS = YES;
@@ -400,7 +408,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.3.1;
+				MARKETING_VERSION = 1.3.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

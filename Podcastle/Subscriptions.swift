@@ -313,6 +313,35 @@ class Subscriptions:NSObject, ObservableObject /*URLSessionDownloadDelegate*/ {
         return (podcasts?.first(where: {$0.id == podcastId})) != nil
     }
     
+    func backgroundRefresh() {
+        print("entered backgroundRefresh")
+        if let podcasts = podcasts, podcasts.count > 0 {
+            downloadCount = podcasts.count
+            for p in podcasts {
+                Downloads.shared.downloadFile(p.feedUrl, localPath:p.fileName(), overwrite:true) { progress in } completionHandler: { url, error in
+                    
+                    /*guard url != nil && error == nil else {
+                        return
+                    }*/
+                    
+                    let fileUrl = url ?? URL(string: p.fileName())
+                        
+                    let parser = PodcastParser()
+                    parser.parseRSSFeed(url: fileUrl!, artwork: p.artworkUrl, nest:true) { items in
+                        self.merge(items)
+                    }
+                    
+                    print("Processing \(p.feedUrl)")
+                }
+            }
+        }
+        else {
+            Task { @MainActor in
+                feed = workFeed
+            }
+        }
+    }
+    
     func refresh() async {
         //workFeed.removeAll(keepingCapacity: true)
         if let podcasts = podcasts, podcasts.count > 0 {

@@ -83,13 +83,15 @@ struct PlayerFileView: View {
 }
 
 struct PlayerProgressView: View {
-    @EnvironmentObject var player:PodcastPlayer
+    private var player = PodcastPlayer.shared
+    @EnvironmentObject var playerProgress:PodcastPlayerProgress
+    @EnvironmentObject var file:PodcastFile
     @State var progress = 0.0
     @State var isEditing = false
     
     var body: some View {
         VStack {
-            Slider(value:$progress, in:0...player.duration, onEditingChanged: { editing in
+            Slider(value:$progress, in:0...playerProgress.duration, onEditingChanged: { editing in
                 if !editing {
                     player.absoluteSeek(progress)
                 }
@@ -104,7 +106,7 @@ struct PlayerProgressView: View {
             .padding(20)
             .tint(.white)
             HStack {
-                Text("\(player.prettyPrintSeconds(player.progress))")
+                Text("\(playerProgress.prettyPrintSeconds(playerProgress.progress))")
                     .font(.body)
                 Spacer()
                 let s = stringForRate(player.rate())
@@ -116,12 +118,13 @@ struct PlayerProgressView: View {
                     }
                 }
                 Spacer()
-                Text("-\(player.prettyPrintSeconds(player.duration-player.progress))").font(.body)
+                Text("-\(playerProgress.prettyPrintSeconds(playerProgress.duration-playerProgress.progress))").font(.body)
             }.padding(.leading, 20).padding(.trailing, 20)
         }
-        .onChange(of: player.progress) { newValue in
-            if progress != player.progress && !isEditing {
-                progress = player.progress
+        .onChange(of: playerProgress.progress) { newValue in
+            if progress != playerProgress.progress && !isEditing {
+                progress = playerProgress.progress
+                file.updateCurrentChapter(playerProgress.progress)
             }
         }
         /*.onChange(of: player.progress) {
@@ -130,7 +133,7 @@ struct PlayerProgressView: View {
             }
         }*/
         .onAppear() {
-            progress = player.progress
+            progress = playerProgress.progress
         }
     }
     
@@ -167,9 +170,34 @@ struct PlayerFullHeaderView: View {
     }
 }
 
+struct PlayerChaptersView: View {
+    @EnvironmentObject var file:PodcastFile
+    
+    var body: some View {
+        VStack {
+            if file.currentChapter != nil {
+                Spacer()
+                let s = file.currentChapter!.prettyPrintChapterTitle(time:false)
+                HStack {
+                    Menu("\(s)") {
+                        ForEach(file.id3v2file!.chapters(), id:\.id) { chapter in
+                            let s = chapter.prettyPrintChapterTitle(time:true)
+                            Button("\(s)", action: {  })
+                        }
+                    }
+                    Spacer()
+                }.padding(.leading, 20).padding(.trailing, 20)
+                Spacer()
+            }
+        }
+    }
+}
+
 struct PlayerView: View {
     @Namespace var bottomID
     @StateObject var player: PodcastPlayer = PodcastPlayer.shared
+    @StateObject var file: PodcastFile = PodcastFile.shared
+    @StateObject var progress: PodcastPlayerProgress = PodcastPlayerProgress.shared
     @State private var backgroundColor: Color = .black
     @State private var details = 0
     @State private var webViewHeight: CGFloat = .zero
@@ -192,6 +220,7 @@ struct PlayerView: View {
                             PlayerControlsView(backgroundColor:backgroundColor)
                             PlayerProgressView()
                             Spacer(minLength: 10)
+                            PlayerChaptersView()
                             if podcastNotes != nil {
                                 ZStack {
                                     Rectangle()
@@ -213,6 +242,8 @@ struct PlayerView: View {
                     }
                 }
                 .environmentObject(player)
+                .environmentObject(file)
+                .environmentObject(progress)
                 .foregroundColor(.white)
                 .background(backgroundColor)
                 .frame(maxWidth:.infinity)

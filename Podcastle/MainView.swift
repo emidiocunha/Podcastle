@@ -254,82 +254,84 @@ struct MainView: View {
   
     var body: some View {
         NavigationStack {
-            PodcastListView()   //.padding(.bottom, 128)
-            .listStyle(.plain)
-            .navigationTitle("Podcastle")
-            .navigationBarTitleDisplayMode(.inline)
-            .refreshable {
-                Subscriptions.shared.sync()
-                Task {
-                    await Subscriptions.shared.refresh()
-                }
-            }
-            .toolbar {
-                ToolbarItemGroup(placement: .navigationBarLeading) {
-                    Button(action: { showingSearch.toggle() }) {
-                        Label("Add Podcast", systemImage: "plus.circle")
+            ZStack(alignment: Alignment.top) {
+                PodcastListView()   //.padding(.bottom, 128)
+                    .listStyle(.plain)
+                    .navigationTitle("Podcastle")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .refreshable {
+                        Subscriptions.shared.sync()
+                        Task {
+                            await Subscriptions.shared.refresh()
+                        }
                     }
-                }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button(action: { showingFeedback.toggle() }) {
-                            Label("Send Feedback", systemImage: "hand.thumbsup")
+                    .toolbar {
+                        ToolbarItemGroup(placement: .navigationBarLeading) {
+                            Button(action: { showingSearch.toggle() }) {
+                                Label("Add Podcast", systemImage: "plus.circle")
+                            }
                         }
-                        Button(action: { showingSubscriptions.toggle() }) {
-                            Label("Manage Subscriptions", systemImage: "checklist")
+                        ToolbarItemGroup(placement: .navigationBarTrailing) {
+                            Menu {
+                                Button(action: { showingFeedback.toggle() }) {
+                                    Label("Send Feedback", systemImage: "hand.thumbsup")
+                                }
+                                Button(action: { showingSubscriptions.toggle() }) {
+                                    Label("Manage Subscriptions", systemImage: "checklist")
+                                }
+                                Button(action: { iap.restore() }) {
+                                    Label("Restore Purchases", systemImage: "purchased")
+                                }
+                                Button(action: { showingLog.toggle() }) {
+                                    Label("Log", systemImage: "list.bullet.rectangle.portrait")
+                                }
+                                Button(action: {
+                                    showingClearCacheAlert.toggle()
+                                }) {
+                                    Label("Clear Cache", systemImage: "trash")
+                                }
+                            } label: {
+                                Label("More", systemImage: "ellipsis.circle")
+                            }
                         }
-                        Button(action: { iap.restore() }) {
-                            Label("Restore Purchases", systemImage: "purchased")
-                        }
-                        Button(action: { showingLog.toggle() }) {
-                            Label("Log", systemImage: "list.bullet.rectangle.portrait")
-                        }
-                        Button(action: {
-                            showingClearCacheAlert.toggle()
-                            }) {
-                            Label("Clear Cache", systemImage: "trash")
-                        }
-                    } label: {
-                        Label("More", systemImage: "ellipsis.circle")
                     }
-                }
+                
+                    .sheet(isPresented:$showingPlayer) {
+                        PlayerView()
+                            .presentationDetents ([.large, .height(128)], selection:$presentationDetent)
+                            .presentationBackground(.black)
+                            .presentationBackgroundInteraction(.enabled)
+                            .presentationDragIndicator(.visible)
+                            .interactiveDismissDisabled()
+                        //.environmentObject(accentColor)
+                            .sheet(isPresented: $showingSearch) {
+                                SearchView()
+                                    .presentationDetents([.large])
+                                    .environmentObject(iap)
+                            }
+                            .sheet(isPresented: $showingLog) {
+                                LogView()
+                                    .presentationDetents([.large])
+                            }
+                            .sheet(isPresented: $showingFeedback) {
+                                FeedbackView()
+                                    .presentationDetents([.large])
+                            }
+                            .sheet(isPresented: $showingSubscriptions) {
+                                ManagePodcastsView()
+                                    .presentationDetents([.large])
+                            }
+                            .alert(isPresented: $showingClearCacheAlert) {
+                                Alert(
+                                    title: Text("Confirm Clear Cache"),
+                                    message: Text("This will delete every image and audio file"),
+                                    primaryButton: .destructive(Text("Continue")) {
+                                        ImageCache.shared.prune(true)
+                                    },
+                                    secondaryButton: .cancel())
+                            }
+                    }
             }
-            .sheet(isPresented:$showingPlayer) {
-                PlayerView()
-                .presentationDetents ([.large, .height(128)], selection:$presentationDetent)
-                .presentationBackground(.black)
-                .presentationBackgroundInteraction(.enabled)
-                .presentationDragIndicator(.visible)
-                .interactiveDismissDisabled()
-                //.environmentObject(accentColor)
-                .sheet(isPresented: $showingSearch) {
-                    SearchView()
-                        .presentationDetents([.large])
-                        .environmentObject(iap)
-                }
-                .sheet(isPresented: $showingLog) {
-                    LogView()
-                        .presentationDetents([.large])
-                }
-                .sheet(isPresented: $showingFeedback) {
-                    FeedbackView()
-                        .presentationDetents([.large])
-                }
-                .sheet(isPresented: $showingSubscriptions) {
-                    ManagePodcastsView()
-                        .presentationDetents([.large])
-                }
-                .alert(isPresented: $showingClearCacheAlert) {
-                    Alert(
-                        title: Text("Confirm Clear Cache"),
-                        message: Text("This will delete every image and audio file"),
-                        primaryButton: .destructive(Text("Continue")) {
-                            ImageCache.shared.prune(true)
-                        },
-                        secondaryButton: .cancel())
-                }
-            }
-            
         }
         .onChange(of: scenePhase) { newScenePhase in
             // TODO: Investigate how to change this to not hide the player
@@ -347,19 +349,19 @@ struct MainView: View {
                     }
                 }
                 break;
-            case .inactive:
-                var transaction = Transaction()
+            /*case .inactive:
+                /*var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
                     showingPlayer = false
-                }
+                }*/
             case .background:
-                var transaction = Transaction()
+                /*var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
                     showingPlayer = false
-                }
-                break
+                }*/
+                break*/
             @unknown default:
                 break
             }

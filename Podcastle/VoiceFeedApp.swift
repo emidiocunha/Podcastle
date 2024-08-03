@@ -41,14 +41,28 @@ struct VoiceFeedApp: App {
             }
         }
         .backgroundTask(.appRefresh(kAppRefreshIdentifier)) {
+            print("entered backgroundRefresh")
             scheduleAppRefresh()
             await Subscriptions.shared.refresh()
+        }
+        .backgroundTask(.urlSession(kBackgroundIdentifier)) {
+        }
+        
+    }
+    
+    func registerBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier:kAppRefreshIdentifier, using: nil) { task in
+            scheduleAppRefresh()
+            Subscriptions.shared.backgroundRefresh()
         }
     }
     
     func scheduleAppRefresh() {
-        let request = BGAppRefreshTaskRequest(identifier: kAppRefreshIdentifier)
-        request.earliestBeginDate = .now.addingTimeInterval(3600 * 12)
+        let request = BGProcessingTaskRequest(identifier: kAppRefreshIdentifier)
+        //let request = BGAppRefreshTaskRequest(identifier: kAppRefreshIdentifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = false
+        request.earliestBeginDate = .now.addingTimeInterval(3600 * 6)
         try? BGTaskScheduler.shared.submit(request)
     }
 }

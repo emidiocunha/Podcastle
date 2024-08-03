@@ -12,6 +12,23 @@ import MediaPlayer
 import Speech
 import NaturalLanguage
 
+class PodcastPlayerProgress : NSObject, ObservableObject {
+    static let shared = PodcastPlayerProgress()
+    
+    @Published var progress:Double = 20.0
+    @Published var duration:Double = 100.0
+    
+    func prettyPrintSeconds(_ seconds:Double) -> String {
+        let hours:Int = Int(seconds) / 3600
+        let minutes:Int = (Int(seconds) - (hours * 3600)) / 60
+        let sec:Int = (Int(seconds) - (hours * 3600) - (minutes * 60))
+        var ret = hours > 0 ? String(format:"%02d:", hours) : ""
+        
+        ret.append(String(format:"%02d:%02d", minutes, sec))
+        return ret
+    }
+}
+
 class PodcastPlayer : NSObject, ObservableObject {
     static let shared = PodcastPlayer()
     var currentPodcast:Podcast?
@@ -20,8 +37,8 @@ class PodcastPlayer : NSObject, ObservableObject {
     private var downloads = Downloads.shared
     @Published var isActive:Bool = false
     @Published var isPlaying:Bool = false
-    @Published var progress:Double = 20.0
-    @Published var duration:Double = 100.0
+    //@Published var progress:Double = 20.0
+    //@Published var duration:Double = 100.0
     @Published var title:String = ""
     @Published var transcription = ""
     @Published var log:[String] = []
@@ -30,6 +47,8 @@ class PodcastPlayer : NSObject, ObservableObject {
     private var inputPipe = Pipe()
     private var outputPipe = Pipe()
     var transcriber = Transcriber.shared
+    private var file = PodcastFile.shared
+    private var progress = PodcastPlayerProgress.shared
     
     private override init() {
         super.init()
@@ -41,6 +60,7 @@ class PodcastPlayer : NSObject, ObservableObject {
                     Transcriber.shared.load(currentPodcast!) //URL(string:currentPodcast!.localAudioUrl)!)
                 }
                 startPlaying()
+                setupChapters()
                 setupRemoteTransportControls()
             }
             //Transcriber.shared.reset()
@@ -55,8 +75,8 @@ class PodcastPlayer : NSObject, ObservableObject {
         currentPodcast = Podcast()
         Transcriber.shared.reset()
         title = ""
-        progress = 0.0
-        duration = 0.0
+        progress.progress = 0.0
+        progress.duration = 0.0
     }
     
     func setPodcast(_ podcast:Podcast) -> Bool {
@@ -71,7 +91,7 @@ class PodcastPlayer : NSObject, ObservableObject {
         UserDefaults.standard.set(podcast.id, forKey: "currentPodcast")
         Transcriber.shared.reset()
         Transcriber.shared.load(podcast) //URL(string:podcast.localAudioUrl)!)
-        extractChapters(from:podcast)
+        setupChapters()
         return true
     }
     
@@ -96,15 +116,15 @@ class PodcastPlayer : NSObject, ObservableObject {
             let url = d.appendingPathComponent(currentPodcast.localAudioUrl, isDirectory: false)
             
             audioPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
-            progress = Subscriptions.shared.podcastPosition(currentPodcast)
+            progress.progress = Subscriptions.shared.podcastPosition(currentPodcast)
             audioPlayer.seek(to:CMTimeMakeWithSeconds(Subscriptions.shared.podcastPosition(currentPodcast), preferredTimescale:Int32(NSEC_PER_SEC)))
-            duration = currentPodcast.duration
-            if duration == 0 {
+            progress.duration = currentPodcast.duration
+            if progress.duration == 0 {
                 Task {
                     do {
                         let a_duration = try await audioPlayer.currentItem?.asset.load(.duration).seconds ?? 0.0
                         Task { @MainActor in
-                            duration = a_duration
+                            progress.duration = a_duration
                         }
                     } catch let error {
                         print("\(error) while loading duration")
@@ -140,12 +160,12 @@ class PodcastPlayer : NSObject, ObservableObject {
         if let currentPodcast = currentPodcast {
             guard currentPodcast.id.count > 0 else { return }
             
-            var n = progress + seconds
+            var n = progress.progress + seconds
             
             if n < 0 {
                 n = 0
-            } else if n > duration {
-                n = duration
+            } else if n > progress.duration {
+                n = progress.duration
             }
             
             audioPlayer.seek(to:CMTimeMakeWithSeconds(n, preferredTimescale:Int32(NSEC_PER_SEC)))
@@ -153,7 +173,7 @@ class PodcastPlayer : NSObject, ObservableObject {
     }
     
     func absoluteSeek(_ seconds:Double) {
-        seek(seconds - progress)
+        seek(seconds - progress.progress)
     }
     
     func podcast() -> Podcast? {
@@ -170,7 +190,12 @@ class PodcastPlayer : NSObject, ObservableObject {
                 guard self?.currentPodcast != nil else {
                     return
                 }
-                self?.progress = time.seconds
+                self?.progress.progress = time.seconds
+                if let c = self?.file.currentChapter {
+                    if time.seconds > Double(c.endTime / 1000) {
+                        self?.file.updateCurrentChapter(time.seconds)
+                    }
+                }
                 Subscriptions.shared.updatePodcastNote(self!.currentPodcast!, position: time.seconds)
                 if Int(time.seconds) % 30 == 0 {
                     Subscriptions.shared.syncNotes()
@@ -288,7 +313,7 @@ class PodcastPlayer : NSObject, ObservableObject {
             
             if let item = audioPlayer.currentItem {
                 nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = item.currentTime().seconds as AnyObject
-                nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration as AnyObject
+                nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = progress.duration as AnyObject
                 nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = audioPlayer.rate as AnyObject
                 nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = false as AnyObject
                 nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPMediaType.podcast.rawValue as AnyObject
@@ -296,6 +321,10 @@ class PodcastPlayer : NSObject, ObservableObject {
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
             }
         }
+    }
+    
+    func setupChapters() {
+        file.loadFile(audioFileURL()?.absoluteString ?? "", seconds:progress.progress)
     }
         
     func play() {
@@ -346,37 +375,6 @@ class PodcastPlayer : NSObject, ObservableObject {
         
         ret.append(String(format:"%02d:%02d", minutes, sec))
         return ret
-    }
-    
-    func extractChapters(from podcast: Podcast) {
-        let asset = AVAsset(url: URL(string: podcast.localAudioUrl)!)
-        
-        // Accessing metadata
-        let metadata = asset.commonMetadata + asset.metadata
-        
-        for item in metadata {
-           if let value = item.value {
-              switch item.commonKey?.rawValue {
-              default:
-                  print("\(value)")
-                 break
-              }
-           }
-        }
-        
-        // Filter for ID3 metadata potentially containing chapter info
-        /*
-        let id3Metadata = metadata.filter { $0.commonKey ==  }
-        
-        for item in id3Metadata {
-            // Assuming chapters might be encoded in the 'comment' field or similar
-            if let key = item.key as? String, key == "COMM" || key == "chapters" {
-                if let value = item.value {
-                    print("Chapter Info: \(value)")
-                    // Further parsing might be required here depending on how chapters are encoded
-                }
-            }
-        }*/
     }
     
     func detectLanguage() -> String {

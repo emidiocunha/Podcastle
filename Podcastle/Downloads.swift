@@ -66,6 +66,10 @@ class Downloads: NSObject, ObservableObject, URLSessionDownloadDelegate {
     
     func downloadFile(_ url:String, localPath:String, overwrite:Bool, progressHandler: @escaping ProgressHandler, completionHandler: @escaping CompletionHandler) {
         if let url = URL(string: url) {
+            guard !downloads.contains(where: { download in
+                return download.url == url
+            }) else { return }
+            
             let (fileExists, localURL, temp) = exists(localPath)
             
             if fileExists && !overwrite {
@@ -90,6 +94,83 @@ class Downloads: NSObject, ObservableObject, URLSessionDownloadDelegate {
             
             downloadTask.resume()
         }
+    }
+    
+    func downloadFileInBackground(_ url:String, localPath:String, overwrite:Bool) async -> Bool {
+        if let url = URL(string: url) {
+            guard !downloads.contains(where: { download in
+                return download.url == url
+            }) else { return false }
+            
+            let (fileExists, localURL, temp) = exists(localPath)
+            
+            if fileExists && !overwrite {
+                #if DEBUG
+                    print("\(localPath) already exists, will not download file")
+                #endif
+                // completionHandler(localURL, nil)
+                return true
+            }
+            
+            if let localURL = URL(string:localPath) {
+                accessQueue.sync {
+                    downloads.append(Download(url:url, localURL: localURL, progressHandler: nil, completionHandler: nil, downloadTask:URLSessionDownloadTask(), progress:0.0, temp: temp, overwrite: overwrite))
+                }
+            } else {
+                return false
+            }
+            
+            let backgroundIdentifier = kBackgroundIdentifier
+            let backgroundConfig = URLSessionConfiguration.background(withIdentifier: backgroundIdentifier)
+            backgroundConfig.sessionSendsLaunchEvents = true
+            let session = URLSession(configuration: backgroundConfig)
+            let request = URLRequest(url:url)
+            
+            let task = session.downloadTask(with: request)
+            
+            task.delegate = self
+            
+            task.resume()
+            
+            return true
+            
+            /*
+            
+            let response = await withTaskCancellationHandler {
+                try? await session.data(for:request)
+            } onCancel: {
+                let task = session.downloadTask(with: request)
+                task.resume ()
+            }
+            
+            if let (data, _) = response {
+                var download:Download?
+                
+                accessQueue.sync {
+                    download = downloads.first(where: {$0.url == url})
+                }
+                
+                if let download = download, let localURL = localURL {
+                    do {
+                        if download.overwrite {
+                            if FileManager.default.fileExists(atPath: download.localURL.path()) {
+                                try FileManager.default.removeItem(at: download.localURL)
+                            }
+                        }
+                        try data.write(to: localURL, options: .atomic)
+                    } catch {
+                        print("Download error: \(error.localizedDescription)")
+                    }
+                    
+                    accessQueue.sync {
+                        downloads.removeAll(where: {$0.url == url})
+                    }
+                }
+            }
+            return true
+             */
+        }
+        return false
     }
     
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
