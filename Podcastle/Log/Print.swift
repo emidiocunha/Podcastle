@@ -17,6 +17,6 @@ public func print(_ items: Any..., separator: String = " ", terminator: String =
     dateFormatter.timeZone = .current
     let currentDateTimeString = dateFormatter.string(from: Date())
     DispatchQueue.main.async {
-        PodcastPlayer.shared.log.append("\(currentDateTimeString) \(output)")
+        LogFile.shared.log.append("\(currentDateTimeString) \(output)")
     }
 }

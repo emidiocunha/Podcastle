@@ -8,8 +8,14 @@
 import Foundation
 import SwiftUI
 
+class LogFile: NSObject, ObservableObject {
+    @Published var log:[String] = []
+    
+    static let shared = LogFile()
+}
+
 struct LogView: View {
-    @ObservedObject var player = PodcastPlayer.shared
+    @ObservedObject var player = LogFile.shared
     
     var body: some View {
         NavigationStack {
