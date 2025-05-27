@@ -1,0 +1,271 @@
+//
+//  Downloads.swift
+//  VoiceFeed
+//
+//  Created by Emídio Cunha on 28/06/2023.
+//
+import Foundation
+import UIKit
+
+typealias ProgressHandler = (Double) -> Void
+typealias CompletionHandler = (URL?, Error?) -> Void
+
+struct Download {
+    var url:URL
+    var localURL:URL
+    var task: Task<(Bool), any Error>?
+    var progress:Double
+    var temp:Bool
+    var overwrite:Bool
+}
+
+@MainActor class DownloadStatus:ObservableObject {
+    @Published var downloads:[Download] = []
+    static let shared = DownloadStatus()
+    
+    func addDownload(_ download:Download) {
+        guard downloadWithURL(download.url) == nil else {
+            return
+        }
+        downloads.append(download)
+    }
+    
+    func removeDownload(_ url: URL) {
+        downloads.removeAll(where: {$0.url == url} )
+    }
+    
+    func downloadWithURL(_ url: URL) -> Download? {
+        return downloads.first(where: {$0.url == url} )
+    }
+    
+    func setDownloadProgress(_ url:URL, progress:Double) {
+        if let index = downloads.firstIndex(where: {$0.url == url }) {
+            if (downloads[index].progress < progress) {
+                downloads[index].progress = progress
+            }
+        }
+    }
+    
+    func progress(_ url:URL) -> Double? {
+        if let d = downloadWithURL(url) {
+            return d.progress
+        }
+        return nil
+    }
+    
+    func contains(_ url:URL) -> Bool {
+        return downloadWithURL(url) != nil
+    }
+}
+
+actor Downloads: NSObject, ObservableObject, Sendable {
+    private var status:DownloadStatus?
+    
+    func setup(status:DownloadStatus) {
+        self.status = status
+    }
+    
+    func exists(_ localPath:String) -> (Bool, URL?, Bool) {
+        if localPath.contains(FileManager.default.temporaryDirectory.path()) {
+            return (false, URL(fileURLWithPath: localPath), true)
+        }
+        return (FileManager().fileExists(atPath: localPath), URL(fileURLWithPath: localPath), false)
+    }
+    
+    func cancelDownload(_ id:String) async {
+        if let url = URL(string:id) {
+            if let d = await status?.downloadWithURL(url) {
+                d.task?.cancel()
+            }
+        }
+    }
+    
+    func downloadTempFile(_ url:String) async throws -> (URL?, Bool) {
+        let uniqueIdentifier = UUID().uuidString
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+        let temporaryFilename = temporaryDirectory.appendingPathComponent("\(uniqueIdentifier)").path()
+    
+        return try await downloadFile(url, localPath: temporaryFilename, overwrite:true, progress:false)
+    }
+    
+    func downloadFile(_ url:String, localPath:String, overwrite:Bool, progress:Bool) async throws -> (URL?, Bool) {
+        if let url = URL(string: url) {
+            let (fileExists, localURL, temp) = exists(localPath)
+            
+            if fileExists && !overwrite {
+#if DEBUG
+                print("\(localPath) already exists, will not download file")
+#endif
+                return (localURL!, true)
+            }
+            
+            if let localURL = localURL {
+                let task = Task {
+                    try await URLSession.shared.download(from:url, localURL: localURL)
+                }
+                
+                let download = Download(url:url, localURL: localURL, task:task, progress:0.0, temp: temp, overwrite: overwrite)
+                
+                if progress {
+                    await status?.addDownload(download)
+                }
+                
+                let result = try await task.value
+                
+                if progress {
+                    await status?.removeDownload(download.url)
+                }
+                
+                return (localURL, result)
+            }
+        }
+        
+        return (nil, false)
+    }
+    
+    func startDownload(_ item:Episode) async {
+        if URL(string: item.audio) != nil {
+            do {
+                (_, _) = try await downloadFile(item.audio, localPath: item.fullLocalUrl(.audio)!.path(), overwrite: false, progress:true)
+            }
+            catch {
+            }
+        }
+    }
+    
+    func checkForDownloads(_ feed:[Episode]) async {
+        for p in feed {
+            let (fileExists, _, _) = self.exists(p.fullLocalUrl(.audio)!.path())
+            
+            if fileExists {
+                #if DEBUG
+                print("\(p.fullLocalUrl(.audio)!.path()) already exists, will not download file")
+                #endif
+            } else {
+                await self.startDownload(p)
+            }
+        }
+    }
+}
+
+
+extension URLSession {
+    func download(from url: URL, localURL:URL) async throws -> Bool {
+        try await download(for: URLRequest(url: url), localURL: localURL)
+    }
+
+    func download(for request: URLRequest, localURL:URL) async throws -> Bool {
+        var totalUnitCount:Int64
+        //let progress = Progress()
+        //parent.addChild(progress, withPendingUnitCount: 1)
+
+        let bufferSize =  1_048_576
+        let estimatedSize: Int64 = 1_000_000
+
+        let (asyncBytes, response) = try await bytes(for: request, delegate: nil)
+        let expectedLength = response.expectedContentLength // note, if server cannot provide expectedContentLength, this will be -1
+        totalUnitCount = expectedLength > 0 ? expectedLength : estimatedSize
+
+        let fileURL = localURL
+        
+        guard let output = OutputStream(url: fileURL, append: false) else {
+            return false
+        }
+        output.open()
+
+        var buffer = Data()
+        
+        let mem = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        let array = UnsafeMutableBufferPointer(start: mem, count: bufferSize)
+        
+        defer {
+            mem.deallocate()
+            output.close()
+        }
+        
+        if expectedLength > 0 {
+            buffer.reserveCapacity(min(bufferSize, Int(expectedLength)))
+        } else {
+            buffer.reserveCapacity(bufferSize)
+        }
+
+        var count: Int64 = 0
+        var index: Int = 0
+        
+        do {
+            for try await byte in asyncBytes {
+                count += 1
+                array[index] = byte
+                index += 1
+                
+                //buffer.append(byte)
+                
+                if index >= bufferSize {
+                    try Task.checkCancellation()
+                    
+                    buffer.append(contentsOf: array)
+                    try output.write(buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                    
+                    index = 0
+                    
+                    await DownloadStatus.shared.setDownloadProgress(request.url!, progress: floor(Double(count) / Double(totalUnitCount) * 100))
+                    
+                    /*if expectedLength < 0 || count > expectedLength {
+                     await DownloadStatus.shared.setDownloadProgress(localURL, progress: floor(Double(count) / Double(totalUnitCount) * 100))
+                     }*/
+                }
+            }
+        } catch {
+            output.close()
+            try FileManager.default.removeItem(at: fileURL)
+            return false
+        }
+        
+        if index != 0 && index < bufferSize {
+            buffer.append(contentsOf: array[0..<index])
+        }
+
+        if !buffer.isEmpty {
+            try output.write(buffer)
+        }
+
+        output.close()
+        
+        return true
+    }
+}
+
+extension OutputStream {
+    
+    enum OutputStreamError: Error {
+       case stringConversionFailure
+       case bufferFailure
+       case writeFailure
+    }
+
+    /// Write `Data` to `OutputStream`
+    ///
+    /// - parameter data:                  The `Data` to write.
+
+    func write(_ data: Data) throws {
+        try data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) throws in
+            guard var pointer = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                throw OutputStreamError.bufferFailure
+            }
+
+            var bytesRemaining = buffer.count
+
+            while bytesRemaining > 0 {
+                let bytesWritten = write(pointer, maxLength: bytesRemaining)
+                if bytesWritten < 0 {
+                    throw OutputStreamError.writeFailure
+                }
+
+                bytesRemaining -= bytesWritten
+                pointer += bytesWritten
+            }
+        }
+    }
+}
+
