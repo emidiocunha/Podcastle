@@ -47,11 +47,11 @@ Make sure to enable background modes and speech recognition in your app’s capa
 
 To give feedback, open the app and use the "Send Feedback" form — it will open your mail client.
 
-Alternatively, you can open an [issue](https://github.com/your-username/podcastle/issues) here on GitHub.
+Alternatively, you can open an [issue](https://github.com/emidiocunha/Podcastle/issues) here on GitHub.
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the MIT License.
 
 ---
 
