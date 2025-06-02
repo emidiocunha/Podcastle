@@ -1,6 +1,6 @@
 # Podcastle
 
-![alt text](https://github.com/emidiocunha/Podcastle/mainscreen.png "Main Screen")
+!["Podcastle Main Screen"](https://github.com/emidiocunha/Podcastle/blob/main/mainscreen.png)
 
 **Podcastle** is a lightweight, open-source podcast player for iOS focused on privacy, performance, and simplicity. It lets users subscribe, download, and transcribe episodes — all without ads, tracking, or telemetry.
 

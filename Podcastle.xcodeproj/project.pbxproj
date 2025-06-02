@@ -73,6 +73,8 @@
 		B8B616752B0CB3EC00297170 /* ManagePodcastsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagePodcastsView.swift; sourceTree = "<group>"; };
 		B8CC51412A4C0ACE0020F9CA /* Downloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Downloads.swift; sourceTree = "<group>"; };
 		B8EA1F9E2DD6659800EA56B2 /* PodcastleStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = PodcastleStore.storekit; sourceTree = "<group>"; };
+		B8FC29092DEE166C006AFD86 /* mainscreen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mainscreen.png; sourceTree = "<group>"; };
+		B8FC290A2DEE166C006AFD86 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		B8FD223D2DBD8C2100582C94 /* TranscriberView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriberView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -103,6 +105,8 @@
 		B851435B2A3116B0003ED322 = {
 			isa = PBXGroup;
 			children = (
+				B8FC29092DEE166C006AFD86 /* mainscreen.png */,
+				B8FC290A2DEE166C006AFD86 /* README.md */,
 				B85143662A3116B0003ED322 /* Podcastle */,
 				B85143652A3116B0003ED322 /* Products */,
 			);

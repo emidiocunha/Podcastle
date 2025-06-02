@@ -192,6 +192,7 @@ struct PodcastListView: View {
             }.onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
                 Task {
                     feed = await subscriptions.loadFeed()
+                    showOnboard = feed.count == 0 ? true : false
                 }
             }.task {
                 Task {
