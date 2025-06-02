@@ -191,11 +191,13 @@ struct PodcastListView: View {
                 Spacer().frame(height: 128)
             }.onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
                 Task {
-                    //await subscriptions.refresh()
                     feed = await subscriptions.loadFeed()
                 }
             }.task {
-                Task { feed = await subscriptions.loadFeed() }
+                Task {
+                    feed = await subscriptions.loadFeed()
+                    showOnboard = feed.count == 0 ? true : false
+                }
             }
         }
     }
