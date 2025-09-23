@@ -107,7 +107,7 @@ struct PodcastItemActionsView: View {
                 Button {
                     Task { await downloads.startDownload(item) }
                 } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
+                    Label("Download", systemImage: "arrow.down")
                 }.buttonStyle(.borderless)
             } else if let progress = downloadStatus.progress(URL(string:item.audio)!) {
                  ProgressBarView(progress:progress, title: "")
@@ -144,7 +144,7 @@ struct PodcastItemActionsView: View {
                         }
                     }
                 }, label: {
-                    Image(systemName: player.isPlaying &&  player.currentPodcast == item ? "pause.circle" : "play.circle")
+                    Image(systemName: player.isPlaying &&  player.currentPodcast == item ? "pause" : "play")
                         .font(.system(size: 24))
                         .foregroundColor(.accentColor)
                 }).buttonStyle(.bordered)
@@ -167,40 +167,49 @@ struct PodcastListView: View {
     @State private var showOnboard = false
     
     var body: some View {
-        if showOnboard {
-            OnboardView()
-        } else {
-            VStack {
-                List(feed, children: \.children) {
-                    item in
-                    VStack {
-                        PodcastItemView(item: item)
-                        PodcastItemActionsView(item: item.episode)
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            //subscriptions.deletePodcastEpisode(item)
-                        } label: {
-                            Label("Remove", systemImage: "trash.fill")
+        VStack {
+            if showOnboard {
+                OnboardView()
+            } else {
+                VStack {
+                    List(feed, children: \.children) {
+                        item in
+                        VStack {
+                            PodcastItemView(item: item)
+                            PodcastItemActionsView(item: item.episode)
+                            // Adding space at the bottom to account for permanent sheet.
+                            if item.id == feed.last?.id {
+                                Spacer(minLength: 144)
+                            }
                         }
-                        .tint(.red)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                //subscriptions.deletePodcastEpisode(item)
+                            } label: {
+                                Label("Remove", systemImage: "trash.fill")
+                            }
+                            .tint(.red)
+                        }
+                        .padding(.top, 8).padding(.bottom, 9)
                     }
-                    .padding(.top, 8).padding(.bottom, 9)
-                }
-                // Adding space at the bottom to account for permanent sheet.
-                Spacer().frame(height: 128)
-            }.onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
-                Task {
-                    feed = await subscriptions.loadFeed()
-                    showOnboard = feed.count == 0 ? true : false
-                }
-            }.task {
-                Task {
-                    feed = await subscriptions.loadFeed()
-                    showOnboard = feed.count == 0 ? true : false
                 }
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
+            Task {
+                await load()
+            }
+        }
+        .task {
+            Task {
+                await load()
+            }
+        }
+    }
+    
+    func load() async {
+        feed = await subscriptions.loadFeed()
+        showOnboard = feed.count == 0 ? true : false
     }
 }
 
@@ -209,6 +218,8 @@ struct MainView: View {
     @EnvironmentObject var subscriptions: Subscriptions
     @EnvironmentObject var downloads: Downloads
     @EnvironmentObject var imageCache: ImageCache
+    @EnvironmentObject var player: PodcastPlayer
+    @EnvironmentObject var file: PodcastFile
     @State var showingSearch = false
     @State var showingPlayer = true
     @State var showingLog = false
@@ -216,7 +227,7 @@ struct MainView: View {
     @State var showingFeedback = false
     @State var showingSubscriptions = false
     @State var showingTipJar = false
-    @State private var presentationDetent = PresentationDetent.height(128.0)
+    @State private var presentationDetent = PresentationDetent.height(144.0)
     @State var themeColor = Color.clear
     @State var title = "Podcastle"
   
@@ -225,20 +236,20 @@ struct MainView: View {
             ZStack(alignment: Alignment.top) {
                 PodcastListView()
                     .listStyle(.plain)
-                    .navigationTitle(title)
-                    .navigationBarTitleDisplayMode(.inline)
+                    //.navigationTitle(title)
+                    //.navigationBarTitleDisplayMode(.automatic)
                     .refreshable {
                         Task {
                             await subscriptions.refresh()
                         }
                     }
-                    .toolbarBackground(themeColor, for: .navigationBar)
-                    .toolbarBackground(.visible, for: .navigationBar)
-                    .toolbarColorScheme(.dark, for: .navigationBar)
+                    //.toolbarBackground(themeColor, for: .navigationBar)
+                    //.toolbarBackground(.visible, for: .navigationBar)
+                    //.toolbarColorScheme(.dark, for: .navigationBar)
                     .toolbar {
                         ToolbarItemGroup(placement: .navigationBarLeading) {
                             Button(action: { showingSearch.toggle() }) {
-                                Label("Add Podcast", systemImage: "plus.circle")
+                                Label("Add Podcast", systemImage: "plus")
                             }
                         }
                         ToolbarItemGroup(placement: .navigationBarTrailing) {
@@ -261,17 +272,19 @@ struct MainView: View {
                                     Label("Clear Cache", systemImage: "trash")
                                 }
                             } label: {
-                                Label("More", systemImage: "ellipsis.circle")
+                                Label("More", systemImage: "ellipsis")
                             }
                         }
                     }
                     .sheet(isPresented:$showingPlayer) {
                         PlayerView(themeColor:$themeColor, title:$title, detent:$presentationDetent)
-                            .presentationDetents ([.large, .height(128)], selection:$presentationDetent)
-                            .presentationBackground(.black)
+                            .presentationDetents ([.large, .height(144)], selection:$presentationDetent)
+                            //.presentationBackground(.black)
                             .presentationBackgroundInteraction(.enabled)
                             .presentationDragIndicator(.visible)
                             .interactiveDismissDisabled()
+                            .environmentObject(player)
+                            .environmentObject(file)
                             .sheet(isPresented: $showingSearch) {
                                 SearchView()
                                     .presentationDetents([.large])

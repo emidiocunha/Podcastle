@@ -12,6 +12,7 @@
 		B806BC062D6F40090042A18E /* Directory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B806BC032D6F40090042A18E /* Directory.swift */; };
 		B82725C72A8117EA00F01ABE /* UIExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B82725C62A8117EA00F01ABE /* UIExtensions.swift */; };
 		B82725C92A8D10E300F01ABE /* ProgressViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B82725C82A8D10E300F01ABE /* ProgressViews.swift */; };
+		B84A36972E09930A002B9B8E /* Podcastle.icon in Resources */ = {isa = PBXBuildFile; fileRef = B84A36962E09930A002B9B8E /* Podcastle.icon */; };
 		B85143682A3116B0003ED322 /* PodcastleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85143672A3116B0003ED322 /* PodcastleApp.swift */; };
 		B851436A2A3116B0003ED322 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85143692A3116B0003ED322 /* MainView.swift */; };
 		B851436C2A3116B1003ED322 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B851436B2A3116B1003ED322 /* Assets.xcassets */; };
@@ -47,6 +48,7 @@
 		B82725C82A8D10E300F01ABE /* ProgressViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressViews.swift; sourceTree = "<group>"; };
 		B82725CA2A8D142600F01ABE /* HTMLView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLView.swift; sourceTree = "<group>"; };
 		B82AB0592D47FA2B003F3B71 /* Podcastle.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Podcastle.entitlements; sourceTree = "<group>"; };
+		B84A36962E09930A002B9B8E /* Podcastle.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Podcastle.icon; sourceTree = "<group>"; };
 		B85143642A3116B0003ED322 /* Podcastle.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Podcastle.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B85143672A3116B0003ED322 /* PodcastleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastleApp.swift; sourceTree = "<group>"; };
 		B85143692A3116B0003ED322 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
@@ -109,6 +111,7 @@
 				B8FC290A2DEE166C006AFD86 /* README.md */,
 				B85143662A3116B0003ED322 /* Podcastle */,
 				B85143652A3116B0003ED322 /* Products */,
+				B84A36962E09930A002B9B8E /* Podcastle.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -281,6 +284,7 @@
 				B851436C2A3116B1003ED322 /* Assets.xcassets in Resources */,
 				B8EA1F9F2DD6659800EA56B2 /* PodcastleStore.storekit in Resources */,
 				B8AF8D5B2ADEAD20008E7974 /* sampletranscript.json in Resources */,
+				B84A36972E09930A002B9B8E /* Podcastle.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -446,12 +450,13 @@
 		B85143732A3116B1003ED322 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Podcastle;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -468,7 +473,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -485,12 +490,13 @@
 		B85143742A3116B1003ED322 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = Podcastle;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 12;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -507,7 +513,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

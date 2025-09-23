@@ -41,6 +41,7 @@ struct PlayerControlsView: View {
     var body: some View {
         HStack {
             Spacer()
+
             Button(action: {
                 Task {
                     if player.isPlaying {
@@ -50,7 +51,7 @@ struct PlayerControlsView: View {
             }) {
                 Image(systemName: "gobackward.30")
                     .font(.system(size: 40))
-                    .foregroundColor(.white)
+                    .foregroundColor(backgroundColor == .clear ? .primary : .white)
             }
             Spacer()
             ZStack {
@@ -68,7 +69,7 @@ struct PlayerControlsView: View {
                 }) {
                     Image(systemName: player.isPlaying && !audioObserver.isAudioInterrupted ? "pause.fill" : "play.fill")
                         .font(.system(size: 36))
-                        .foregroundColor(.white)
+                        .foregroundColor(backgroundColor == .clear ? .primary : .white)
                 }
             }
             Spacer()
@@ -79,9 +80,15 @@ struct PlayerControlsView: View {
             }) {
                 Image(systemName: "goforward.30")
                     .font(.system(size: 40))
-                    .foregroundColor(.white)
+                    .foregroundColor(backgroundColor == .clear ? .primary : .white)
             }
             Spacer()
+        }
+        .onChange(of: audioObserver.shouldResumePlaying) {
+            if audioObserver.shouldResumePlaying {
+                player.play()
+                audioObserver.resetPlaying()
+            }
         }
     }
     
@@ -290,8 +297,8 @@ struct PlayerView: View {
         GeometryReader { proxy in
             ScrollView {
                 ZStack(alignment: .top) {
-                    Color.clear
-                    if proxy.size.height > 128 || forceRedraw {
+//                    Color.clear
+                    if proxy.size.height > 144 || forceRedraw {
                         VStack(alignment: .center, spacing: 20.0) {
                             PlayerFullHeaderView()
                             PlayerControlsView(backgroundColor:backgroundColor)
@@ -312,20 +319,21 @@ struct PlayerView: View {
                             PlayerFileView()
                         }.opacity(1.0 - fader(proxy.size.height))
                     }
-                    
                     VStack(alignment:.center) {
                         HStack {
-                            Text("\(player.title)").font(.body).padding().lineLimit(1)
+                            Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.primary)
                             Spacer()
                         }
-                        PlayerControlsView(backgroundColor:backgroundColor)
+                        PlayerControlsView(backgroundColor:Color.clear)
                     }.opacity(fader(proxy.size.height))
+                    .frame(maxHeight: .infinity)
+                    .frame(maxWidth: .infinity)
                 }
             }
             .environmentObject(file)
             .environmentObject(progress)
             .foregroundColor(.white)
-            .background(backgroundColor)
+            .background(proxy.size.height > 144 ? AnyView(backgroundColor):nil).ignoresSafeArea(.all)
             .frame(maxWidth:.infinity)
             .animationsDisabled()
             .scrollDismissesKeyboard(.immediately)
@@ -371,7 +379,7 @@ struct PlayerView: View {
     }
     
     func fader(_ height:Double) -> Double {
-        var r:Double = 2.0 - 1.0/128.0 * height
+        var r:Double = 2.0 - 1.0/144.0 * height
         
         if r < 0 {
             r = 0

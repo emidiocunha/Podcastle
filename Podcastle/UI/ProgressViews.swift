@@ -77,18 +77,18 @@ struct CircularProgressView: View {
             ZStack {
                 Circle()
                     .stroke(
-                        Color.white,
+                        backgroundColor == .clear ? Color.primary : Color.white,
                         lineWidth: 7
                     )
                 Circle()
                     .stroke(
-                        backgroundColor,
+                        backgroundColor == .clear ? Color.white : backgroundColor,
                         lineWidth: 5
                     )
                 Circle()
                     .trim(from: 0, to: progress/100)
                     .stroke(
-                        Color.white,
+                        backgroundColor == .clear ? Color.primary : Color.white,
                         style: StrokeStyle(
                             lineWidth: 5,
                             lineCap: .butt

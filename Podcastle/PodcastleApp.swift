@@ -62,6 +62,12 @@ struct PodcastleApp: App {
                     .environmentObject(player)
                     .environmentObject(file)
                     .environmentObject(imageCache)
+/*#if targetEnvironment
+                    .frame(minWidth: 480, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity )
+                    .windowStyle(.titleBar)
+                    .windowResizability(.contentSize)
+#endif*/
+
             }
             else {
                 ProgressView()

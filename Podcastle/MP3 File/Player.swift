@@ -38,6 +38,7 @@ import SwiftData
 
 @MainActor class AudioInterruptionObserver: ObservableObject {
     @Published var isAudioInterrupted = false
+    @Published var shouldResumePlaying = false
 
     init() {
         NotificationCenter.default.addObserver(
@@ -64,12 +65,15 @@ import SwiftData
 
         case .ended:
             // Interruption ended
+            DispatchQueue.main.async {
+                self.isAudioInterrupted = false
+            }
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 if options.contains(.shouldResume) {
                     // Resume playback if appropriate
                     DispatchQueue.main.async {
-                        self.isAudioInterrupted = false
+                        self.shouldResumePlaying = true
                     }
                 }
             }
@@ -77,6 +81,10 @@ import SwiftData
         @unknown default:
             break
         }
+    }
+    
+    func resetPlaying() {
+        shouldResumePlaying = false
     }
 }
 
@@ -92,8 +100,9 @@ import SwiftData
     var secondsLeft:Double = 0.0
     var currentPodcast:Episode?
     
-    // Heloper Objects
+    // Helper Objects
     private let audioPlayer = AVPlayer()
+    private var isAudioSessionActive = false
     private var timeObserverToken: Any?
     private var file:PodcastFile?
     private var subscriptions:Subscriptions?
@@ -293,10 +302,10 @@ import SwiftData
         // Get the shared MPRemoteCommandCenter
         let commandCenter = MPRemoteCommandCenter.shared()
 
-        // Add wired playpase command
+        // Add wired playpause command
         commandCenter.togglePlayPauseCommand.isEnabled = true
         commandCenter.togglePlayPauseCommand.addTarget { [unowned self] event in
-            if audioPlayer.rate != 0 {
+            if audioPlayer.timeControlStatus == .playing {
                 self.pause()
             } else {
                 self.play()
@@ -307,7 +316,7 @@ import SwiftData
         // Add handler for Play Command
         commandCenter.playCommand.isEnabled = true
         commandCenter.playCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 0.0 {
+            if self.audioPlayer.timeControlStatus != .playing {
                 self.play()
                 return .success
             }
@@ -317,7 +326,7 @@ import SwiftData
         // Add handler for Pause Command
         commandCenter.pauseCommand.isEnabled = true
         commandCenter.pauseCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 1.0 {
+            if self.audioPlayer.timeControlStatus == .playing {
                 self.pause()
                 self.setupNowPlaying()
                 return .success
@@ -329,7 +338,7 @@ import SwiftData
         commandCenter.skipForwardCommand.isEnabled = true
         commandCenter.skipForwardCommand.preferredIntervals = [NSNumber(30.0)]
         commandCenter.skipForwardCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 1.0 {
+            if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(30)
                 self.setupNowPlaying()
                 return .success
@@ -341,7 +350,7 @@ import SwiftData
         commandCenter.skipBackwardCommand.isEnabled = true
         commandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(30.0)]
         commandCenter.skipBackwardCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 1.0 {
+            if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(-30)
                 return .success
             }
@@ -351,7 +360,7 @@ import SwiftData
         // Add handler for Skip Forward Command
         commandCenter.nextTrackCommand.isEnabled = true
         commandCenter.nextTrackCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 1.0 {
+            if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(30)
                 self.setupNowPlaying()
                 return .success
@@ -362,7 +371,7 @@ import SwiftData
         // Add handler for Skip Backward Command
         commandCenter.previousTrackCommand.isEnabled = true
         commandCenter.previousTrackCommand.addTarget { [unowned self] event in
-            if self.audioPlayer.rate == 1.0 {
+            if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(-30)
                 return .success
             }
@@ -378,28 +387,28 @@ import SwiftData
         if let currentPodcast = currentPodcast {
             nowPlayingInfo[MPMediaItemPropertyTitle] = currentPodcast.title
             nowPlayingInfo[MPMediaItemPropertyArtist] = currentPodcast.author
-            do {
-                var imageData: Data?
-                
-                if let image = image {
-                    nowPlayingInfo[MPMediaItemPropertyArtwork] =
-                    MPMediaItemArtwork(boundsSize: image.size) { size in
-                        return image
-                    }
-                } else {
-                    let localUrl = currentPodcast.fullLocalUrl(.artwork)!
-                    imageData = try Data(contentsOf: localUrl)
-                    
-                    if  let imageData = imageData,
-                        let image = UIImage(data:imageData) {
-                        nowPlayingInfo[MPMediaItemPropertyArtwork] =
-                        MPMediaItemArtwork(boundsSize: image.size) { size in
-                            return image
+            // Set artwork if we already have it in memory; otherwise update asynchronously
+            if let image = image {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] =
+                MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            } else if let localUrl = currentPodcast.fullLocalUrl(.artwork) {
+                // Defer disk I/O off the main actor to avoid UI hitch during play/pause
+                Task.detached { [weak self] in
+                    guard let self else { return }
+                    do {
+                        let data = try Data(contentsOf: localUrl)
+                        if let img = UIImage(data: data) {
+                            await MainActor.run {
+                                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? nowPlayingInfo
+                                updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+                                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                                self.image = img
+                            }
                         }
+                    } catch {
+                        // Ignore artwork failure; keep playing
                     }
                 }
-            } catch let error {
-                print("Error using local image: ", error)
             }
             
             if let item = audioPlayer.currentItem {
@@ -424,15 +433,18 @@ import SwiftData
             
             self.objectWillChange.send()
             do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
-                try AVAudioSession.sharedInstance().setActive(true)
+                if !isAudioSessionActive {
+                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    isAudioSessionActive = true
+                }
             } catch {
                 print(error)
             }
             let r = rate
             audioPlayer.rate = r
             audioPlayer.playImmediately(atRate: r)
-            addPeriodicTimeObserver()
+            if timeObserverToken == nil { addPeriodicTimeObserver() }
             setupNowPlaying()
             isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
             MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
@@ -444,9 +456,16 @@ import SwiftData
         audioPlayer.pause()
         isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
-        NotificationCenter.default.removeObserver(self)
+    }
+
+    func stopAndDeactivateSession() {
+        self.objectWillChange.send()
+        audioPlayer.pause()
+        isPlaying = false
+        MPNowPlayingInfoCenter.default().playbackState = .paused
         do {
-            try AVAudioSession.sharedInstance().setActive(false)
+            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+            isAudioSessionActive = false
         } catch {
             print(error)
         }

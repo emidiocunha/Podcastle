@@ -254,6 +254,7 @@ struct GroupedEpisodeList:Identifiable {
         print("entered backgroundRefresh")
         if let podcasts = await podcastDirectory(), let downloads, podcasts.count > 0 {
             downloadCount = podcasts.count
+            var firstInsertedAcrossAll: [Episode] = []
             for p in podcasts {
                 do {
                     let (_, _) = try await downloads.downloadFile(p.feed, localPath:p.fileName(), overwrite:true, progress: false)
@@ -262,13 +263,18 @@ struct GroupedEpisodeList:Identifiable {
                     
                     let parser = PodcastParser()
                     let items = await parser.parseRSSFeed(p)
-                    await self.merge(p, episodes:items)
+                    let inserted = await merge(p, episodes: items, deferRefresh: true)
+                    firstInsertedAcrossAll.append(contentsOf: inserted)
                     
                     print("Processing \(p.feed)")
                 }
                 catch {
                     
                 }
+            }
+            _ = saveAndRefresh()
+            if !firstInsertedAcrossAll.isEmpty {
+                await downloads.checkForDownloads(firstInsertedAcrossAll)
             }
         }
     }
@@ -278,34 +284,46 @@ struct GroupedEpisodeList:Identifiable {
         print("refresh")
         if let podcasts = await podcastDirectory(), let downloads, podcasts.count > 0 {
             self.downloadCount = podcasts.count
+            var firstInsertedAcrossAll: [Episode] = []
             for p in podcasts {
                 do {
                     let (_, _) = try await downloads.downloadFile(p.feed, localPath:p.fileName(), overwrite:true, progress:false)
                     let parser = PodcastParser()
                     
                     let items = await parser.parseRSSFeed(p)
-                    await self.merge(p, episodes:Array(items.prefix(10)))
+                    let inserted = await merge(p, episodes:Array(items.prefix(10)), deferRefresh: true)
+                    firstInsertedAcrossAll.append(contentsOf: inserted)
                     
                     print("Processing \(p.feed)")
                 } catch {
                 }
             }
+            // Save once and notify UI once to reduce render thrash
+            _ = saveAndRefresh()
+            if !firstInsertedAcrossAll.isEmpty {
+                await downloads.checkForDownloads(firstInsertedAcrossAll)
+            }
         }
     }
     
     /// Merges new episodes into the data model.
-    func merge(_ d:Directory, episodes:[Episode]) async {
-        let newEpisodes:[Episode] = episodes.first != nil ? [episodes.first!] : []
-        
+    func merge(_ d:Directory, episodes:[Episode], deferRefresh: Bool = false) async -> [Episode] {
+        var inserted: [Episode] = []
         for podcast in episodes {
             if await findEpisode(podcast.audio) == nil {
                 podcast.directory = d
                 context.insert(podcast)
+                inserted.append(podcast)
             }
         }
-        if saveAndRefresh() && newEpisodes.count > 0 {
-            await downloads?.checkForDownloads(newEpisodes)
+        // Save changes; if deferring, leave pending changes for caller to batch-save & notify once
+        if deferRefresh {
+            return inserted
+        } else {
+            if saveAndRefresh(), let first = inserted.first {
+                await downloads?.checkForDownloads([first])
+            }
+            return inserted
         }
     }
 }
-    
