@@ -35,7 +35,6 @@ import WebKit
 struct PlayerControlsView: View {
     let backgroundColor: Color
     @EnvironmentObject var player:PodcastPlayer
-    @StateObject private var audioObserver = AudioInterruptionObserver()
     @EnvironmentObject var progress:Progress
     
     var body: some View {
@@ -67,7 +66,7 @@ struct PlayerControlsView: View {
                         }
                     }
                 }) {
-                    Image(systemName: player.isPlaying && !audioObserver.isAudioInterrupted ? "pause.fill" : "play.fill")
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 36))
                         .foregroundColor(backgroundColor == .clear ? .primary : .white)
                 }
@@ -83,12 +82,6 @@ struct PlayerControlsView: View {
                     .foregroundColor(backgroundColor == .clear ? .primary : .white)
             }
             Spacer()
-        }
-        .onChange(of: audioObserver.shouldResumePlaying) {
-            if audioObserver.shouldResumePlaying {
-                player.play()
-                audioObserver.resetPlaying()
-            }
         }
     }
     
@@ -317,6 +310,7 @@ struct PlayerView: View {
                                 }
                             TranscriptView()
                             PlayerFileView()
+                            Spacer(minLength: 20)
                         }.opacity(1.0 - fader(proxy.size.height))
                     }
                     VStack(alignment:.center) {

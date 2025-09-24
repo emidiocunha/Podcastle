@@ -36,10 +36,46 @@ struct TranscriptView: View {
     @EnvironmentObject var subscriptions:Subscriptions
     @State var searchString = ""
     @State var limit = 10
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         VStack {
             Text("Transcript").font(.title2)
+        }
+        HStack {
+            Spacer()
+            Button {
+                if transcriber.working {
+                    transcriber.cancel()
+                } else {
+                    limit = Int.max
+                    Task { await transcribe() }
+                }
+            } label: {
+                Image(systemName: "waveform")
+                Text(transcriber.working ? "Stop" : "Start")
+            }.buttonStyle(.bordered)
+            if !transcriber.working && transcriber.sentences.count > 0 {
+                Spacer()
+                Button {
+                    showDeleteConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                    Text("Delete")
+                }
+                .buttonStyle(.bordered)
+                .alert("Delete transcription?", isPresented: $showDeleteConfirm) {
+                    Button("Delete", role: .destructive) {
+                        transcriber.deleteTranscription()
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This will permanently remove the current transcript.")
+                }
+                Spacer()
+                ShareLink(item: transcriber.copyText()).buttonStyle(.borderedProminent)
+            }
+            Spacer()
         }
         VStack(alignment: .leading, spacing: 8.0) {
             if !transcriber.working {
@@ -105,36 +141,9 @@ struct TranscriptView: View {
                 Spacer()
             }
         }
-        HStack {
-            Spacer()
-            Button {
-                if transcriber.working {
-                    transcriber.cancel()
-                } else {
-                    limit = Int.max
-                    Task { await transcribe() }
-                }
-            } label: {
-                Image(systemName: "waveform")
-                Text(transcriber.working ? "Stop" : "Start")
-            }.buttonStyle(.bordered)
-            if !transcriber.working && transcriber.sentences.count > 0 {
-                Spacer()
-                Button {
-                    transcriber.deleteTranscription()
-                } label: {
-                    Image(systemName: "trash")
-                    Text("Delete")
-                }.buttonStyle(.bordered)
-                Spacer()
-                ShareLink(item: transcriber.copyText()).buttonStyle(.borderedProminent)
-            }
-            Spacer()
-        }
     }
     
     func transcribe() async {
-        transcriber.setup(subscriptions:subscriptions)
         if let currentPodcast = player.currentPodcast {
             let localUrl = currentPodcast.fullLocalUrl(.audio)!
             
@@ -146,7 +155,7 @@ struct TranscriptView: View {
     func detectLanguage() -> String {
         if let currentPodcast = player.currentPodcast {
             let recognizer = NLLanguageRecognizer()
-            recognizer.processString(currentPodcast.desc)
+            recognizer.processString(currentPodcast.title + "\n\n" + currentPodcast.desc)
             
             if let languageCode = recognizer.dominantLanguage?.rawValue {
                 let detectedLanguage = languageCode

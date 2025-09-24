@@ -39,7 +39,7 @@ struct Sentence:Codable, Identifiable {
     let timestamp:TimeInterval
 }
 
-final class  Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDelegate {
+final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDelegate {
     @Published var text:String = ""
     @Published var working = false
     @Published var sentences: [Sentence] = []
@@ -252,17 +252,130 @@ final class  Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDele
         }
     }
 
-    func transcribeAudioFileWithTimestamps(at url: URL) async { //}, completion: @escaping ([(String, TimeInterval)]?,
+    func transcribeAudioFileWithTimestamps(at url: URL) async {
         let fn = audioURL?.deletingPathExtension().lastPathComponent
-        
         await setStatus("Starting...")
-        await recognizeSpeech(url)
-
+        if #available(iOS 26.0, *) {
+            await transcribeWithSpeechAnalyzer(at: url)
+        } else {
+            await recognizeSpeech(url)
+        }
         if let fn = fn {
             subscriptions?.saveArrayToDisk(array: allSentences, filePath: fn + ".json")
         }
-        
         await setStatus("")
+    }
+    
+    @available(iOS 26.0, *)
+    public func ensureModel(transcriber: SpeechTranscriber, locale: Locale) async throws {
+        guard await supported(locale: locale) else {
+            throw NSError(domain: "SpeechAnalyzerExample", code: 1, userInfo: [NSLocalizedDescriptionKey: "Locale not supported"])
+        }
+        
+        if await installed(locale: locale) {
+            return
+        } else {
+            try await downloadIfNeeded(for: transcriber)
+        }
+    }
+    
+    @available(iOS 26.0, *)
+    func supported(locale: Locale) async -> Bool {
+        let supported = await SpeechTranscriber.supportedLocales
+        return supported.map { $0.identifier(.bcp47) }.contains(locale.identifier(.bcp47))
+    }
+
+    @available(iOS 26.0, *)
+    func installed(locale: Locale) async -> Bool {
+        let installed = await Set(SpeechTranscriber.installedLocales)
+        return installed.map { $0.identifier(.bcp47) }.contains(locale.identifier(.bcp47))
+    }
+
+    @available(iOS 26.0, *)
+    func downloadIfNeeded(for module: SpeechTranscriber) async throws {
+        if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
+            try await downloader.downloadAndInstall()
+        }
+    }
+    
+    @available(iOS 26.0, *)
+    func transcriber(for locale: Locale) -> SpeechTranscriber {
+        SpeechTranscriber(locale: locale, preset: .timeIndexedProgressiveTranscription)
+    }
+    
+    @available(iOS 26.0, *)
+    private func firstSupportedLocaleMatchingLanguage(_ language: String) async -> Locale {
+        // Build a Locale from the provided language string (e.g., "en", "pt", "zh-Hant")
+        let target = Locale(identifier: language)
+
+        // Extract a language code robustly across SDK evolutions
+        // Prefer modern API; fall back to deprecated `languageCode` if needed.
+        let targetCode = target.language.languageCode?.identifier
+        ?? target.language.languageCode?.identifier  // deprecated but useful on older bases
+            ?? language.lowercased()
+
+        // Look through the SpeechTranscriber-supported locales
+        let supported = await SpeechTranscriber.supportedLocales
+        for loc in supported {
+            let code = loc.language.languageCode?.identifier
+            if code?.lowercased() == targetCode.lowercased() {
+                return loc
+            }
+        }
+        return Locale(identifier: "en-US")
+    }
+    
+    @available(iOS 26.0, *)
+    func transcribeWithSpeechAnalyzer(at:URL) async {
+        do {
+            let audioFile = try AVAudioFile(forReading: at)
+        
+            //Setting locale
+            var locale = Locale(identifier: "\(language)_\(Locale.current.language.region!.identifier)")
+            
+            // Fallback
+            if await !supported(locale: locale) {
+               locale = await firstSupportedLocaleMatchingLanguage(language)
+            }
+            
+            //Creating Transcriber Module
+            let transcriber = transcriber(for: locale)
+
+            //Checking Assets
+            try await ensureModel(transcriber: transcriber, locale: locale)
+            let analyzer = SpeechAnalyzer(modules: [transcriber])
+            
+            try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+
+            await setStatus("Transcribing")
+
+            for try await result in transcriber.results {
+                if !working {
+                    // Cancel
+                    await analyzer.cancelAndFinishNow()
+                    return
+                }
+                if result.isFinal {
+                    let bestTranscription = result.text // an AttributedString
+                    let plainTextBestTranscription = String(bestTranscription.characters) // a String
+                    
+                    // Get the word-level timing information
+                    var timestamps: [(String, TimeInterval)] = []
+                    
+                    if let t = result.text.runs.first?.audioTimeRange {
+                        let timestamp = self.currentTimeOffset + t.start.seconds
+                        timestamps.append((plainTextBestTranscription, timestamp))
+                        
+                        Task {
+                            await self.updateTimestamps(timestamps)
+                        }
+                    }
+                }
+            }
+        }
+        catch {
+            await setStatus("Could not transcribe \(error.localizedDescription)")
+        }
     }
     
     func cancel() {
@@ -278,44 +391,27 @@ final class  Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDele
         resumePosition = 0
     }
     
-/*    func load(_ podcast:Podcast) {
-        if let url = URL(string:podcast.localAudioUrl) {
-            let fn = url.deletingPathExtension().lastPathComponent
-            
-            allSentences = subscriptions?.loadArrayFromDisk(filePath: fn + ".json") ?? []
-            
-            if let fullURL = podcast.fullLocalUrl(.audio) {
-                checkResumable(fullURL)
-                audioURL = fullURL
-            }
-            
-            sentences = allSentences
-        }
-    }
- */
-    
     func deleteTranscription() {
         if let fn = audioURL?.deletingPathExtension().lastPathComponent {
-            reset()
-            do {
-                try FileManager.default.removeItem(atPath: fn + ".json")
-            } catch {
-                print("Error deleting \(fn)")
+            if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let fullPath = documents.appendingPathComponent(fn + ".json", isDirectory: false)
+                
+                reset()
+                do {
+                    try FileManager.default.removeItem(at: fullPath)
+                } catch {
+                    print("Error deleting \(fn)")
+                }
             }
         }
     }
     
-    func load(_ string:String) -> Transcriber {
-        if let path = Bundle.main.path(forResource: string, ofType: "json") {
-            if let data = FileManager.default.contents(atPath: path) {
-                do {
-                    let array = try JSONDecoder().decode([Sentence].self, from: data)
-                    allSentences = array
-                    sentences = allSentences
-                } catch {
-                    print("Failed to load array from disk: \(error)")
-                }
-            }
+    func load(_ url:URL?) -> Transcriber {
+        audioURL = url
+        if let fn = url?.deletingPathExtension().lastPathComponent {
+            let array:[Sentence] = subscriptions?.loadArrayFromDisk(filePath: fn + ".json") ?? []
+            allSentences = array
+            sentences = allSentences
         }
         return self
     }
@@ -337,4 +433,3 @@ final class  Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDele
         await transcribeAudioFileWithTimestamps(at: url)
     }
 }
-

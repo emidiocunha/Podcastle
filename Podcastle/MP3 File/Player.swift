@@ -36,57 +36,6 @@ import Speech
 import NaturalLanguage
 import SwiftData
 
-@MainActor class AudioInterruptionObserver: ObservableObject {
-    @Published var isAudioInterrupted = false
-    @Published var shouldResumePlaying = false
-
-    init() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioSessionInterruption),
-            name: AVAudioSession.interruptionNotification,
-            object: nil
-        )
-    }
-
-    @objc private func handleAudioSessionInterruption(notification: Notification) {
-        guard let userInfo = notification.userInfo,
-              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
-            return
-        }
-
-        switch type {
-        case .began:
-            // Interruption began
-            DispatchQueue.main.async {
-                self.isAudioInterrupted = true
-            }
-
-        case .ended:
-            // Interruption ended
-            DispatchQueue.main.async {
-                self.isAudioInterrupted = false
-            }
-            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
-                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-                if options.contains(.shouldResume) {
-                    // Resume playback if appropriate
-                    DispatchQueue.main.async {
-                        self.shouldResumePlaying = true
-                    }
-                }
-            }
-
-        @unknown default:
-            break
-        }
-    }
-    
-    func resetPlaying() {
-        shouldResumePlaying = false
-    }
-}
 
 @MainActor class PodcastPlayer : ObservableObject {
     // These are considered @Published vars but we do it manually
@@ -121,12 +70,31 @@ import SwiftData
                 }
             }
         }
+        // Observe audio route changes (e.g., Bluetooth disconnects)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioRouteChange(_:)),
+            name: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        // Observe audio session interruptions (e.g., phone calls, Siri, etc.)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
     }
     
     // Wire up helper objects that don't transfer from the SwiftUI environment
     func setup(subscriptions:Subscriptions?, transcriber:Transcriber?, file:PodcastFile?, downloads:Downloads?) {
         self.subscriptions = subscriptions
         self.transcriber = transcriber
+        
+        if let s = subscriptions, let t = transcriber {
+            t.setup(subscriptions: s)
+        }
+        
         self.file = file
         self.downloads = downloads
         Task {
@@ -171,7 +139,7 @@ import SwiftData
         }
         UserDefaults.standard.set(podcast.audio, forKey: "currentPodcast")
         transcriber?.reset()
-        _ = transcriber?.load(podcast.audio)
+        _ = transcriber?.load(podcast.fullLocalUrl(.audio))
         setupChapters()
         startPlaying()
         return true
@@ -182,7 +150,7 @@ import SwiftData
         return currentPodcast?.fullLocalUrl(.audio)
     }
     
-    // 
+    //
     func startPlaying() {
         if let t = timeObserverToken {
             audioPlayer.removeTimeObserver(t)
@@ -212,6 +180,7 @@ import SwiftData
             isActive = true
             file?.updateCurrentChapter(progress)
             updateImage()
+            setupNowPlaying()
         }
     }
     
@@ -426,7 +395,62 @@ import SwiftData
     func setupChapters() {
         file?.loadFile(audioFileURL()?.path() ?? "", seconds:progress)
     }
-        
+
+    @objc private func handleAudioRouteChange(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+            return
+        }
+
+        switch reason {
+        case .oldDeviceUnavailable:
+            // Previous output disappeared (e.g., Bluetooth headphones turned off)
+            if let prevRoute = userInfo[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription {
+                let wasBluetooth = prevRoute.outputs.contains { desc in
+                    desc.portType == .bluetoothA2DP ||
+                    desc.portType == .bluetoothLE ||
+                    desc.portType == .bluetoothHFP
+                }
+                if wasBluetooth {
+                    // Pause playback when BT drops to avoid blasting on speaker
+                    self.pause()
+                }
+            } else {
+                // If we can't determine previous route, be conservative and pause
+                self.pause()
+            }
+        case .newDeviceAvailable:
+            // A new output became available (e.g., BT connected). Optionally resume or keep state.
+            break
+        default:
+            break
+        }
+    }
+    
+    @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            pause()
+        case .ended:
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                // If the system suggests resuming, set the flag; caller can decide
+                if options.contains(.shouldResume) {
+                    play()
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+            
     func play() {
         if let currentPodcast = currentPodcast {
             guard currentPodcast.audio.count > 0 else { return }
@@ -469,5 +493,10 @@ import SwiftData
         } catch {
             print(error)
         }
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance())
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
     }
 }
