@@ -393,7 +393,7 @@ import SwiftData
     }
     
     func setupChapters() {
-        file?.loadFile(audioFileURL()?.path() ?? "", seconds:progress)
+        file?.loadFile(audioFileURL()?.path() ?? "", seconds:progress, desc:currentPodcast?.desc)
     }
 
     @objc private func handleAudioRouteChange(_ notification: Notification) {

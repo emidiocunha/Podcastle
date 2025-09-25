@@ -73,7 +73,7 @@ struct TranscriptView: View {
                     Text("This will permanently remove the current transcript.")
                 }
                 Spacer()
-                ShareLink(item: transcriber.copyText()).buttonStyle(.borderedProminent)
+                ShareLink(item: transcriber.copyText()).buttonStyle(.bordered)
             }
             Spacer()
         }
@@ -88,6 +88,20 @@ struct TranscriptView: View {
                 }.onAppear {
                     UITextField.appearance().clearButtonMode = .whileEditing
                 }.padding(.bottom, 12.0)
+            }
+            if transcriber.working {
+                VStack(spacing: 20.0) {
+                    HStack {
+                        Spacer()
+                        ProgressView().tint(.white).controlSize(.large)
+                        Spacer()
+                    }
+                    HStack {
+                        Spacer()
+                        Text("\(transcriber.status)")
+                        Spacer()
+                    }
+                }.padding(.top, 20.0).padding(.bottom, 20.0)
             }
             ForEach(transcriber.sentences.prefix(limit)) { sentence in
                 HStack(alignment: .top) {
@@ -115,21 +129,7 @@ struct TranscriptView: View {
                 }
                 Divider()
             }
-            if transcriber.working {
-                VStack(spacing: 20.0) {
-                    HStack {
-                        Spacer()
-                        ProgressView().tint(.white).controlSize(.large)
-                        Spacer()
-                    }
-                    HStack {
-                        Spacer()
-                        Text("\(transcriber.status)")
-                        Spacer()
-                    }
-                }.padding(.top, 20.0).padding(.bottom, 20.0)
-            }
-        }.padding()
+        }.padding().ignoresSafeArea(.keyboard, edges: .bottom)
         if !transcriber.working && limit < transcriber.sentences.count {
             HStack {
                 Spacer()

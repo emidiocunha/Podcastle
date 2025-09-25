@@ -100,6 +100,21 @@ struct ID3V2Frame:Identifiable, Hashable {
     var subFrames:[ID3V2Frame] = []
     var url:URL? = nil
     
+
+    /// Convenience initializer for creating simple frames (e.g., CHAP, TIT2) manually.
+    init(frameID: String, startTime: UInt32 = 0, endTime: UInt32 = 0, title: String = "", elementID: String = "", subFrames: [ID3V2Frame] = [], url: URL? = nil) {
+        self.frameID = frameID
+        self.size = 0
+        self.flags = 0
+        self.pic = nil
+        self.startTime = startTime
+        self.endTime = endTime
+        self.title = title
+        self.elementID = elementID
+        self.subFrames = subFrames
+        self.url = url
+    }
+    
     /// Initializes an ID3V2Frame from binary data at a given offset.
     init?(from data: Data, offset:UInt64) {
         frameID = String(data: data[offset ..< offset + 4], encoding: .ascii) ?? ""
@@ -309,6 +324,84 @@ struct ID3V2File {
             }
         }
     }
+    
+    /// Parse free-form text for chapter timestamps and build ID3 CHAP frames.
+    /// Accepts "MM:SS" or "HH:MM:SS" timestamps. The title is the text immediately following
+    /// each timestamp up to the next timestamp.
+    /// This updates `chaptersCache` and replaces existing CHAP frames in `frames`.
+    @discardableResult
+    mutating func createChapters(from content: String) -> [ID3V2Frame] {
+        // Regex finds every timestamp (MM:SS or HH:MM:SS)
+        // Examples matched: "00:00", "1:05:12", "09:20" (no space required before/after)
+        let pattern = #"(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return []
+        }
+
+        let full = content as NSString
+        let range = NSRange(location: 0, length: full.length)
+        let matches = regex.matches(in: content, options: [], range: range)
+        guard !matches.isEmpty else { return [] }
+
+        // Helper to parse a timestamp string into seconds (UInt32 ms returned)
+        func ms(from ts: String) -> UInt32 {
+            let parts = ts.split(separator: ":").map { String($0) }
+            var h = 0, m = 0, s = 0
+            if parts.count == 3 {
+                h = Int(parts[0]) ?? 0
+                m = Int(parts[1]) ?? 0
+                s = Int(parts[2]) ?? 0
+            } else if parts.count == 2 {
+                m = Int(parts[0]) ?? 0
+                s = Int(parts[1]) ?? 0
+            }
+            let total = h * 3600 + m * 60 + s
+            return UInt32(total * 1000)
+        }
+
+        // Build chapters from each timestamp to the next
+        var newChapters: [ID3V2Frame] = []
+        for (idx, match) in matches.enumerated() {
+            let ts = full.substring(with: match.range)
+            let startMs = ms(from: ts)
+
+            let titleStart = match.range.upperBound
+            let titleEnd = (idx + 1 < matches.count) ? matches[idx + 1].range.lowerBound : range.upperBound
+            let titleRange = NSRange(location: titleStart, length: max(0, titleEnd - titleStart))
+            var title = full.substring(with: titleRange)
+
+            // Clean up title whitespace/newlines
+            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // Compute end time from next chapter start (exclusive); 0 means "unknown/last"
+            let endMs: UInt32 = {
+                if idx + 1 < matches.count {
+                    let nextTs = full.substring(with: matches[idx + 1].range)
+                    let nextStart = ms(from: nextTs)
+                    return nextStart > startMs ? (nextStart) : 0
+                }
+                return 0
+            }()
+
+            // Create a CHAP frame with a TIT2 subframe for the title
+            //var chap = ID3V2Frame(from: Data(), offset: 0) // we will construct manually below
+            // Manual init fallback: construct by setting fields directly
+            var chap = ID3V2Frame(frameID: "CHAP", startTime: startMs, endTime: endMs, title: "", elementID: UUID().uuidString, subFrames: [], url: nil)
+
+            // Create a minimal TIT2 subframe carrying the chapter title
+            var tit2 = ID3V2Frame(frameID: "TIT2", startTime: 0, endTime: 0, title: title, elementID: "", subFrames: [], url: nil)
+            chap.subFrames = [tit2]
+
+            newChapters.append(chap)
+        }
+
+        // Replace existing CHAP frames in `frames` with the newly generated list
+        frames.removeAll(where: { $0.frameID == "CHAP" })
+        frames.append(contentsOf: newChapters)
+        chaptersCache = newChapters
+        return newChapters
+    }
+    
     
     /// Returns all chapter frames.
     func chapters() -> [ID3V2Frame] {

@@ -32,6 +32,17 @@ import CryptoKit
 import AVFoundation
 import SwiftData
 
+extension String {
+    var htmlDecoded: String {
+        guard let data = self.data(using: .utf8) else { return self }
+        let opts: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+            .documentType: NSAttributedString.DocumentType.html,
+            .characterEncoding: String.Encoding.utf8.rawValue
+        ]
+        return (try? NSAttributedString(data: data, options: opts, documentAttributes: nil))?.string ?? self
+    }
+}
+
 enum PodcastURLType {
     case artwork
     case audio
@@ -164,9 +175,9 @@ class PodcastParser: NSObject, XMLParserDelegate {
         if elementName == "item" {
             isParsingItem = false
             
-            currentPodcast?.title = currentTitle
+            currentPodcast?.title = currentTitle.htmlDecoded
             currentPodcast?.desc = sanitizeHTML(currentDescription)
-            currentPodcast?.summary = currentSummary
+            currentPodcast?.summary = currentSummary.htmlDecoded
             currentPodcast?.link = currentLink
             currentPodcast?.artwork = currentImageURL.count > 0 ? currentImageURL : altArtwork
             currentPodcast?.audio = currentAudioURL

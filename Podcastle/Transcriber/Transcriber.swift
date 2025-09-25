@@ -80,22 +80,31 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
     }
     
     func filter(_ text:String) {
-        lock.lock()
-        if text.count == 0 {
+        // Trim whitespace/newlines and handle trivial cases fast on the main thread
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if query.isEmpty {
             sentences = allSentences
             return
-        } else if text.count > 2 {
-            //Task.init(priority: .userInitiated) {
-                let s = text.lowercased()
-                let result = allSentences.filter { value in
-                    value.sentence.lowercased().contains(s)
-                }
-                //Task { @MainActor in
-                sentences = result
-                //}
-            //}
         }
-        lock.unlock()
+        if query.count <= 2 {
+            // Ignore very short queries to avoid unnecessary churn
+            sentences = allSentences
+            return
+        }
+
+        // Capture snapshot to avoid concurrent mutation concerns
+        let source = allSentences
+
+        // Do the potentially expensive filtering off the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            let lower = query.lowercased()
+            let result = source.filter { $0.sentence.lowercased().contains(lower) }
+
+            // Publish results back on the main thread
+            DispatchQueue.main.async {
+                self.sentences = result
+            }
+        }
     }
     
     func copyText() -> String {
