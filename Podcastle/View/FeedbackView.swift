@@ -41,20 +41,19 @@ struct FeedbackView: View {
         NavigationStack {
             ScrollView {
                 Text("Write us your opinion, suggestions, or problems with the app!")
+                TextField("e-mail (optional)", text: $email)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+                    .focused($isFocused)
                 TextField(commentsLabel, text:$comments, axis: .vertical)
                     .lineLimit(4, reservesSpace: true)
                     .textFieldStyle(.roundedBorder)
                     .padding()
-                    .focused($isFocused)
                 Button {
                     sendComments()
                 } label: {
                     Text("Send").frame(width:240)
                 }.buttonStyle(.bordered).padding()
-                HStack {
-                    Text("By tapping Send, you will be taken to your email client to send the feedback.").font(.footnote)
-                    Spacer()
-                }.padding()
             }
             .onAppear{
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5){
@@ -69,7 +68,7 @@ struct FeedbackView: View {
     func sendComments() {
         guard comments != commentsLabel else { return }
 
-        let subject = "Feedback for Podcastle"
+        /*let subject = "Feedback for Podcastle"
         let toEmail = "feedback@example.com" // Replace with actual feedback email address
         let body = """
         \(comments)
@@ -84,9 +83,41 @@ struct FeedbackView: View {
         
         if let url = URL(string: urlString) {
             UIApplication.shared.open(url)
+        }*/
+        
+        Task {
+            let feedback = Feedback()
+            
+            try! await feedback.sendFeedback(contact: email, message: comments)
         }
-
+        
         dismiss()
+    }
+}
+
+struct Feedback {
+    struct FeedbackPayload: Codable {
+      let contact: String?
+      let message: String
+      let appVersion: String
+      let os: String
+      let locale: String
+    }
+
+    func sendFeedback(contact: String?, message: String) async throws {
+      let payload = FeedbackPayload(
+        contact: contact,
+        message: message,
+        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+        os: "iOS \(await UIDevice.current.systemVersion)",
+        locale: Locale.current.identifier
+      )
+      var req = URLRequest(url: URL(string: "https://feedback.mobyte.app")!)
+      req.httpMethod = "POST"
+      req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+      req.httpBody = try JSONEncoder().encode(payload)
+      let (_, resp) = try await URLSession.shared.data(for: req)
+      guard (resp as? HTTPURLResponse)?.statusCode == 204 else { throw URLError(.badServerResponse) }
     }
 }
 

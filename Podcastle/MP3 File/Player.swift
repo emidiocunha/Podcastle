@@ -263,6 +263,8 @@ import SwiftData
                     self.currentPodcast?.position = time.seconds
                     _ = await self.subscriptions?.save()
                 }
+                
+                self.updateNowPlayingElapsed(self.progress, playbackRate: self.rate)
             }
         }
     }
@@ -297,7 +299,6 @@ import SwiftData
         commandCenter.pauseCommand.addTarget { [unowned self] event in
             if self.audioPlayer.timeControlStatus == .playing {
                 self.pause()
-                self.setupNowPlaying()
                 return .success
             }
             return .commandFailed
@@ -309,7 +310,7 @@ import SwiftData
         commandCenter.skipForwardCommand.addTarget { [unowned self] event in
             if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(30)
-                self.setupNowPlaying()
+                self.updateNowPlayingElapsed(currentPodcast?.position ?? 0.0, playbackRate: self.rate)
                 return .success
             }
             return .commandFailed
@@ -331,7 +332,7 @@ import SwiftData
         commandCenter.nextTrackCommand.addTarget { [unowned self] event in
             if self.audioPlayer.timeControlStatus == .playing {
                 self.seek(30)
-                self.setupNowPlaying()
+                self.updateNowPlayingElapsed(currentPodcast?.position ?? 0.0, playbackRate: self.rate)
                 return .success
             }
             return .commandFailed
@@ -390,6 +391,16 @@ import SwiftData
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
             }
         }
+    }
+    
+    @MainActor
+    func updateNowPlayingElapsed(_ seconds: Double, playbackRate: Float? = nil) {
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = seconds
+        if let rate = playbackRate {
+            info[MPNowPlayingInfoPropertyPlaybackRate] = rate
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
     
     func setupChapters() {
