@@ -31,6 +31,18 @@ import Foundation
 import SwiftUI
 import Speech
 import WebKit
+import AVKit
+
+struct AudioOutputPickerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.activeTintColor = .tintColor
+        view.tintColor = .gray
+        return view
+    }
+
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
 
 struct PlayerControlsView: View {
     let backgroundColor: Color
@@ -38,50 +50,57 @@ struct PlayerControlsView: View {
     @EnvironmentObject var progress:Progress
     
     var body: some View {
-        HStack {
-            Spacer()
-
-            Button(action: {
-                Task {
-                    if player.isPlaying {
-                        player.seek(-30)
-                    }
-                }
-            }) {
-                Image(systemName: "gobackward.30")
-                    .font(.system(size: 40))
-                    .foregroundColor(backgroundColor == .clear ? .primary : .white)
-            }
-            Spacer()
-            ZStack {
-                if player.currentPodcast != nil {
-                    CircularProgressView(progress: timeLeft(), backgroundColor: backgroundColor).frame(width:60, height:60)
-                }
+        ZStack {
+            HStack {
+                Spacer()
                 Button(action: {
                     Task {
                         if player.isPlaying {
-                            player.pause()
-                        } else {
-                            player.play()
+                            player.seek(-30)
                         }
                     }
                 }) {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 36))
+                    Image(systemName: "gobackward.30")
+                        .font(.system(size: 40))
                         .foregroundColor(backgroundColor == .clear ? .primary : .white)
                 }
-            }
-            Spacer()
-            Button(action: {
-                if player.isPlaying {
-                    player.seek(30)
+                Spacer().frame(width:44)
+                ZStack {
+                    if player.currentPodcast != nil {
+                        CircularProgressView(progress: timeLeft(), backgroundColor: backgroundColor).frame(width:60, height:60)
+                    }
+                    Button(action: {
+                        Task {
+                            if player.isPlaying {
+                                player.pause()
+                            } else {
+                                player.play()
+                            }
+                        }
+                    }) {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(backgroundColor == .clear ? .primary : .white)
+                    }
                 }
-            }) {
-                Image(systemName: "goforward.30")
-                    .font(.system(size: 40))
-                    .foregroundColor(backgroundColor == .clear ? .primary : .white)
+                Spacer().frame(width:44)
+                Button(action: {
+                    if player.isPlaying {
+                        player.seek(30)
+                    }
+                }) {
+                    Image(systemName: "goforward.30")
+                        .font(.system(size: 40))
+                        .foregroundColor(backgroundColor == .clear ? .primary : .white)
+                }
+                Spacer()
             }
-            Spacer()
+            HStack {
+                Spacer()
+                AudioOutputPickerView()
+                                .frame(width: 30, height: 30)
+                                .padding()
+            }
         }
     }
     
@@ -223,11 +242,9 @@ struct PlayerChaptersView: View {
     var body: some View {
         VStack {
             if file.currentChapter != nil {
-                //Spacer()
                 let current = file.currentChapter!.prettyPrintChapterTitle(time:true)
                 ForEach(file.id3v2file!.chapters(), id:\.id) { chapter in
                     HStack {
-                        //Menu {
                         let s = chapter.prettyPrintChapterTitle(time:true)
                         if s == current {
                             Button("\(s)", action: { player.absoluteSeek(Double(chapter.startTime) / 1000.0) })
@@ -250,15 +267,7 @@ struct PlayerChaptersView: View {
                             Spacer()
                         }.padding(.top, 20).padding(.bottom, 20)
                     }
-                    //} label: {
-                    //    Button("\(s)", action:{}).buttonStyle(.bordered)
-                    //}
-                    
                 }
-                /*if let u = file.currentChapter!.chapterURL() {
-                    Link(u.absoluteString, destination: u).font(.footnote).padding(.leading, 20).padding(.trailing, 20)
-                }*/
-                //Spacer()
             }
         }
     }
@@ -290,7 +299,6 @@ struct PlayerView: View {
         GeometryReader { proxy in
             ScrollView {
                 ZStack(alignment: .top) {
-//                    Color.clear
                     if proxy.size.height > 144 || forceRedraw {
                         VStack(alignment: .center, spacing: 20.0) {
                             PlayerFullHeaderView()
@@ -313,15 +321,17 @@ struct PlayerView: View {
                             Spacer(minLength: 20)
                         }.opacity(1.0 - fader(proxy.size.height))
                     }
-                    VStack(alignment:.center) {
-                        HStack {
-                            Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.primary)
-                            Spacer()
-                        }
-                        PlayerControlsView(backgroundColor:Color.clear)
-                    }.opacity(fader(proxy.size.height))
-                    .frame(maxHeight: .infinity)
-                    .frame(maxWidth: .infinity)
+                    else {
+                        VStack(alignment:.center) {
+                            HStack {
+                                Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.primary)
+                                Spacer()
+                            }
+                            PlayerControlsView(backgroundColor:Color.clear)
+                        }.opacity(fader(proxy.size.height))
+                            .frame(maxHeight: .infinity)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
             .environmentObject(file)
@@ -346,6 +356,7 @@ struct PlayerView: View {
                     podcastNotes = notes()
                     forceRedraw = true
                     themeColor = backgroundColor
+                    progress.value = player.progress
                     title = newValue?.author ?? ""
                 }
             }
@@ -452,7 +463,7 @@ struct SheetView: View {
 
 struct Player_Previews: PreviewProvider {
     static var previews: some View {
-        SheetView()
+        //SheetView()
     }
 }
 

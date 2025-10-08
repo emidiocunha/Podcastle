@@ -183,16 +183,32 @@ import SwiftData
             setupNowPlaying()
         }
     }
+        
+    private func imageHash(_ img: UIImage?) -> Int? {
+        guard let data = img?.pngData() else { return nil }
+        // Lightweight djb2 over the first 128 bytes to avoid heavy hashing
+        var hash = 5381
+        for b in data.prefix(128) { hash = ((hash << 5) &+ hash) &+ Int(b) }
+        return hash
+    }
     
     // The podcast image cover, or chapter image is updated here if necessary
     func updateImage() {
         if let ch = file?.currentChapter {
-            image = ch.chapterImage()
+            if let chapterImage = ch.chapterImage() {
+                if imageHash(image) != imageHash(chapterImage) {
+                    image = chapterImage
+                    updateNowPlayingArtwork()
+                }
+            } else if image != nil {
+                image = nil
+                updateNowPlayingArtwork()
+            }
         } else {
-            image = nil
-        }
-        if isPlaying {
-            setupNowPlaying()
+            if image != nil {
+                image = nil
+                updateNowPlayingArtwork()
+            }
         }
     }
 
@@ -389,6 +405,38 @@ import SwiftData
                 nowPlayingInfo[MPNowPlayingInfoPropertyMediaType] = MPMediaType.podcast.rawValue as AnyObject
                 nowPlayingInfo[MPMediaItemPropertyAlbumTrackNumber] = 1 as AnyObject
                 MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
+            }
+        }
+    }
+    
+    @MainActor
+    func updateNowPlayingArtwork() {
+        // Set artwork if we already have it in memory; otherwise update asynchronously
+        if let currentPodcast = currentPodcast {
+            var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+            
+            if let image = image {
+                info[MPMediaItemPropertyArtwork] =
+                MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+            } else if let localUrl = currentPodcast.fullLocalUrl(.artwork) {
+                // Defer disk I/O off the main actor to avoid UI hitch during play/pause
+                Task.detached { [weak self] in
+                    guard let self else { return }
+                    do {
+                        let data = try Data(contentsOf: localUrl)
+                        if let img = UIImage(data: data) {
+                            await MainActor.run {
+                                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
+                                updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+                                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                                self.image = img
+                            }
+                        }
+                    } catch {
+                        // Ignore artwork failure; keep playing
+                    }
+                }
             }
         }
     }
