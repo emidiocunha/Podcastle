@@ -64,7 +64,7 @@ struct PlayerControlsView: View {
                         .font(.system(size: 40))
                         .foregroundColor(backgroundColor == .clear ? .primary : .white)
                 }
-                Spacer().frame(width:44)
+                Spacer().frame(width:48)
                 ZStack {
                     if player.currentPodcast != nil {
                         CircularProgressView(progress: timeLeft(), backgroundColor: backgroundColor).frame(width:60, height:60)
@@ -83,7 +83,7 @@ struct PlayerControlsView: View {
                             .foregroundColor(backgroundColor == .clear ? .primary : .white)
                     }
                 }
-                Spacer().frame(width:44)
+                Spacer().frame(width:48)
                 Button(action: {
                     if player.isPlaying {
                         player.seek(30)

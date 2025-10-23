@@ -50,7 +50,11 @@ import SwiftData
     
     func fileName() -> String {
         if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            return documents.appendingPathComponent("\(its_id).json", isDirectory: false).path()
+            if its_id == 0 {
+                return URL(string: feed)?.path() ?? ""
+            } else {
+                return documents.appendingPathComponent("\(its_id).json", isDirectory: false).path()
+            }
         } else {
             return ""
         }

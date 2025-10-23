@@ -35,7 +35,7 @@ struct PodcastDetails: View {
     @State var results:[Episode] = []
     @State var isSubscribed:Bool = false
     @EnvironmentObject var subscriptions: Subscriptions
-    
+      
     var body: some View {
         NavigationStack {
             List {
@@ -175,6 +175,8 @@ struct SearchView: View {
     @State var searchText:String = ""
     @State var top = false
     @State var changes = 0
+    @State var showSuccessAlert = false
+    @State private var isLoading = false
     let directory = PodcastDirectorySearch()
     @Environment(\.dismissSearch) var dismissSearch
     @Environment(\.dismiss) var dismiss
@@ -197,26 +199,47 @@ struct SearchView: View {
             .listStyle(.plain)
             .navigationTitle("Add Podcast")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $searchText, prompt:"Search for Podcasts")
+            .searchable(text: $searchText, prompt:"Search for Podcasts or type a URL")
             .onSubmit(of: .search) {
                 if startsWithValidURL(string:searchText) {
+                    isLoading = true
                     Task {
+                        defer { isLoading = false }
                         if let podcasts = await directory.fetchPodcasts(urlString: searchText, downloads: downloads) { //{ (podcasts, error) in
                             if let first = podcasts.first {
                                 await subscriptions.addPodcast(first)
                                 changes = changes + 1
-                                dismissSearch()
-                                dismiss()
+                                showSuccessAlert = true
                             }
                         }
                     }
                 } else {
+                    isLoading = true
                     Task {
+                        defer { isLoading = false }
                         if let podcasts = await directory.fetchPodcasts(searchTerm: searchText, downloads: downloads) { results = podcasts
                         }
                         dismissSearch()
                         top = false
                     }
+                }
+            }
+            .overlay {
+                if isLoading {
+                    ZStack {
+                        Color.black.opacity(0.15).ignoresSafeArea()
+                        ProgressView("Searching…")
+                            .padding(16)
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .allowsHitTesting(true)
+                }
+            }
+            .alert("Podcast added successfully!", isPresented: $showSuccessAlert) {
+                Button("OK", role: .cancel) {
+                    dismissSearch()
+                    dismiss()
                 }
             }
             .onAppear {
