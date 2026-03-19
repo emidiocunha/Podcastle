@@ -136,6 +136,10 @@ import SwiftData
         Task {
             _ = await subscriptions?.save()
             _ = try! await downloads?.downloadFile(podcast.artwork, localPath:podcast.fullLocalUrl(.artwork)!.path(), overwrite:false, progress: false)
+            // If artwork wasn't available when setupNowPlaying ran, load it now
+            if self.image == nil {
+                self.updateNowPlayingArtwork()
+            }
         }
         UserDefaults.standard.set(podcast.audio, forKey: "currentPodcast")
         transcriber?.reset()
@@ -197,15 +201,18 @@ import SwiftData
         if let ch = file?.currentChapter {
             if let chapterImage = ch.chapterImage() {
                 if imageHash(image) != imageHash(chapterImage) {
+                    objectWillChange.send()
                     image = chapterImage
                     updateNowPlayingArtwork()
                 }
             } else if image != nil {
+                objectWillChange.send()
                 image = nil
                 updateNowPlayingArtwork()
             }
         } else {
             if image != nil {
+                objectWillChange.send()
                 image = nil
                 updateNowPlayingArtwork()
             }
@@ -388,6 +395,7 @@ import SwiftData
                                 var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? nowPlayingInfo
                                 updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                                 MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                                self.objectWillChange.send()
                                 self.image = img
                             }
                         }
@@ -396,7 +404,7 @@ import SwiftData
                     }
                 }
             }
-            
+
             if let item = audioPlayer.currentItem {
                 nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = item.currentTime().seconds as AnyObject
                 nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration as AnyObject
@@ -430,6 +438,7 @@ import SwiftData
                                 var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
                                 updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                                 MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
+                                self.objectWillChange.send()
                                 self.image = img
                             }
                         }
