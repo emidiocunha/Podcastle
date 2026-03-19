@@ -322,10 +322,10 @@ struct PlayerView: View {
                     else {
                         VStack(alignment:.center) {
                             HStack {
-                                Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.primary)
+                                Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.white)
                                 Spacer()
                             }
-                            PlayerControlsView(backgroundColor:Color.clear)
+                            PlayerControlsView(backgroundColor:backgroundColor)
                         }.opacity(fader(proxy.size.height))
                             .frame(maxHeight: .infinity)
                             .frame(maxWidth: .infinity)
@@ -335,7 +335,7 @@ struct PlayerView: View {
             .environmentObject(file)
             .environmentObject(player.playbackProgress)
             .foregroundColor(.white)
-            .background(proxy.size.height > 144 ? AnyView(backgroundColor):nil).ignoresSafeArea(.all)
+            .background(AnyView(backgroundColor)).ignoresSafeArea(.all)
             .frame(maxWidth:.infinity)
             .animationsDisabled()
             .scrollDismissesKeyboard(.immediately)
