@@ -138,7 +138,6 @@ struct PlayerFileView: View {
 
 struct PlayerProgressView: View {
     @EnvironmentObject var player:PodcastPlayer
-    @EnvironmentObject var file:PodcastFile
     @EnvironmentObject var progress:Progress
     @State var isEditing = false
     @State var rate:Float = 0.0
@@ -180,12 +179,6 @@ struct PlayerProgressView: View {
                 Text("-\(Double(player.duration - progress.value).prettyPrintSeconds())").font(.body.monospacedDigit())
             }.padding(.leading, 20).padding(.trailing, 20)
         }
-/*        .onChange(of: player.progress) { oldValue, newValue in
-            if progressValue != player.progress && !isEditing {
-                progressValue = player.progress
-                file.updateCurrentChapter(player.progress)
-            }
-        }*/
         .onChange(of: player.rate) { oldValue, newValue in
             rate = player.rate
         }
@@ -286,7 +279,6 @@ struct PlayerView: View {
     @Binding var title: String
     @Binding var detent: PresentationDetent
     @EnvironmentObject var player:PodcastPlayer
-    @EnvironmentObject var file:PodcastFile
     @EnvironmentObject var subscriptions:Subscriptions
     @EnvironmentObject var imageCache:ImageCache
     @State private var backgroundColor: Color = .black
@@ -332,7 +324,6 @@ struct PlayerView: View {
                     }
                 }
             }
-            .environmentObject(file)
             .environmentObject(player.playbackProgress)
             .foregroundColor(.white)
             .background(AnyView(backgroundColor)).ignoresSafeArea(.all)
