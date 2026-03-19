@@ -160,7 +160,7 @@ struct PlayerProgressView: View {
             .padding(20)
             .tint(.white)
             HStack {
-                Text("\(player.progress.prettyPrintSeconds())")
+                Text("\(progress.value.prettyPrintSeconds())")
                     .font(.body.monospacedDigit())
                 Spacer()
                 let s = stringForRate(rate)
@@ -177,7 +177,7 @@ struct PlayerProgressView: View {
                     Button("\(s)x", action:{}).buttonStyle(.bordered)
                 }
                 Spacer()
-                Text("-\(Double(player.duration - player.progress).prettyPrintSeconds())").font(.body.monospacedDigit())
+                Text("-\(Double(player.duration - progress.value).prettyPrintSeconds())").font(.body.monospacedDigit())
             }.padding(.leading, 20).padding(.trailing, 20)
         }
 /*        .onChange(of: player.progress) { oldValue, newValue in
@@ -292,8 +292,6 @@ struct PlayerView: View {
     @State private var backgroundColor: Color = .black
     @State private var podcastNotes:AttributedString? = nil
     @State private var forceRedraw = false
-    @State private var timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-    @StateObject var progress = Progress(0.0)
     
     var body: some View {
         GeometryReader { proxy in
@@ -335,7 +333,7 @@ struct PlayerView: View {
                 }
             }
             .environmentObject(file)
-            .environmentObject(progress)
+            .environmentObject(player.playbackProgress)
             .foregroundColor(.white)
             .background(proxy.size.height > 144 ? AnyView(backgroundColor):nil).ignoresSafeArea(.all)
             .frame(maxWidth:.infinity)
@@ -356,25 +354,12 @@ struct PlayerView: View {
                     podcastNotes = notes()
                     forceRedraw = true
                     themeColor = backgroundColor
-                    progress.value = player.progress
                     title = newValue?.author ?? ""
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
                 Task {
                     await checkCurrentEpisode()
-                }
-            }
-            .onReceive(timer) { _ in
-                if (player.isPlaying) {
-                    progress.value = player.progress
-                }
-            }
-            .onChange(of: player.isPlaying) { _, newValue in
-                if newValue {
-                    timer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
-                } else {
-                    timer.upstream.connect().cancel()
                 }
             }
             .onChange(of: detent) {

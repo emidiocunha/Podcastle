@@ -48,7 +48,11 @@ import SwiftData
     var image:UIImage? = nil
     var secondsLeft:Double = 0.0
     var currentPodcast:Episode?
-    
+
+    // Dedicated observable for playback position — updated without triggering
+    // a full player objectWillChange, so only progress-related views re-render.
+    let playbackProgress = Progress(0.0)
+
     // Helper Objects
     private let audioPlayer = AVPlayer()
     private var isAudioSessionActive = false
@@ -117,6 +121,7 @@ import SwiftData
         title = ""
         secondsLeft = 0.0
         progress = 0.0
+        playbackProgress.value = 0.0
         duration = 0.0
         let r = UserDefaults.standard.float(forKey: "lastRate")
         if r != 0.0 {
@@ -167,6 +172,7 @@ import SwiftData
             objectWillChange.send()
             audioPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
             progress = currentPodcast.position
+            playbackProgress.value = currentPodcast.position
             audioPlayer.seek(to:CMTimeMakeWithSeconds(currentPodcast.position, preferredTimescale:Int32(NSEC_PER_SEC)))
             duration = currentPodcast.duration
             secondsLeft = (duration) - progress
@@ -248,9 +254,9 @@ import SwiftData
                     n = d
                 }
             }
-            self.objectWillChange.send()
             audioPlayer.seek(to:CMTimeMakeWithSeconds(n, preferredTimescale:Int32(NSEC_PER_SEC)))
             progress = n
+            playbackProgress.value = n
             file?.updateCurrentChapter(n)
             updateImage()
         }
@@ -280,6 +286,7 @@ import SwiftData
                     self.updateImage()
                 }
                 self.progress = time.seconds
+                self.playbackProgress.value = time.seconds
                 self.secondsLeft = self.duration - time.seconds
                 // Throttle saving to database every 30s
                 if Int(time.seconds) % 30 == 0 {
