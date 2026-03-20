@@ -402,8 +402,6 @@ import SwiftData
                                 var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? nowPlayingInfo
                                 updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                                 MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                                self.objectWillChange.send()
-                                self.image = img
                             }
                         }
                     } catch {
@@ -445,8 +443,6 @@ import SwiftData
                                 var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
                                 updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
                                 MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                                self.objectWillChange.send()
-                                self.image = img
                             }
                         }
                     } catch {
