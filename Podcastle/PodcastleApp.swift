@@ -80,6 +80,7 @@ struct PodcastleApp: App {
                             await checkMigration()
                             await downloads.setup(status: downloadStatus)
                             player.setup(subscriptions: subscriptions, transcriber: transcriber, file:file, downloads:downloads)
+                            appDelegate.registerDownloads(downloads)
                         } catch {
                             print("Could not initialize: \(error)")
                         }
@@ -121,16 +122,37 @@ struct PodcastleApp: App {
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private var subscriptions:Subscriptions?
-    
+    private var downloads:Downloads?
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     )  -> Bool {
         registerBackgroundTasks()
         scheduleAppRefresh()
         return true
     }
-    
+
     func registerSubscriptions(_ sub:Subscriptions) {
         subscriptions = sub
+    }
+
+    func registerDownloads(_ d:Downloads) {
+        downloads = d
+    }
+
+    // iOS calls this when a background URLSession has events to deliver.
+    // We must create/reconnect to the same session and call the completion
+    // handler only after urlSessionDidFinishEvents fires — telling iOS the
+    // app is done processing so it can take a new snapshot.
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == kBackgroundDownloadIdentifier else {
+            completionHandler()
+            return
+        }
+        Task {
+            await downloads?.setBackgroundCompletionHandler(completionHandler)
+        }
     }
 
     func registerBackgroundTasks() {
