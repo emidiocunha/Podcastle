@@ -112,11 +112,12 @@ struct SearchViewItem: View {
     var top:Bool
     var directory:PodcastDirectorySearch
     @State private var isSubscribed: Bool = false
+    @State private var isAdding: Bool = false
     @EnvironmentObject var downloads: Downloads
     @EnvironmentObject var subscriptions: Subscriptions
     @Environment(\.dismissSearch) var dismissSearch
     @Environment(\.dismiss) var dismiss
-    
+
     var body: some View {
         VStack {
             HStack {
@@ -140,22 +141,31 @@ struct SearchViewItem: View {
                     }).buttonStyle(.bordered)
                 } else {
                     Button(action: {
+                        guard !isAdding else { return }
+                        isAdding = true
                         if top {
+                            // Needs an iTunes lookup first — show spinner while that resolves
                             Task {
-                                if let entry = await directory.fetchTop(item, downloads: downloads) { //entry, error in
-                                    await subscriptions.addPodcast(entry)
-                                    dismiss()
+                                if let entry = await directory.fetchTop(item, downloads: downloads) {
+                                    subscriptions.addPodcast(entry)
                                 }
+                                dismiss()
                             }
                         } else {
                             Task {
-                                await subscriptions.addPodcast(item)
+                                subscriptions.addPodcast(item)
                                 dismiss()
                             }
                         }
                     }, label: {
-                        Text("Add")
-                    }).buttonStyle(.bordered)
+                        if isAdding {
+                            ProgressView().frame(width: 44)
+                        } else {
+                            Text("Add")
+                        }
+                    })
+                    .buttonStyle(.bordered)
+                    .disabled(isAdding)
                 }
             }
             HStack {

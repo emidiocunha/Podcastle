@@ -180,11 +180,27 @@ struct GroupedEpisodeList:Identifiable {
         return saveAndRefresh()
     }
     
-    /// Adds a podcast and refreshes feeds.
+    /// Adds a podcast and refreshes only that podcast's feed immediately.
+    /// Using the full refresh() here would serially re-download every existing
+    /// subscription before getting to the new one, causing a long delay.
     func addPodcast(_ directory:Directory) {
         _ = addDirectory(directory)
         Task {
-            await refresh()
+            await refreshSingle(directory)
+        }
+    }
+
+    /// Downloads, parses and merges the feed for a single podcast directory.
+    /// Notifies the UI and starts the latest-episode download as soon as done.
+    private func refreshSingle(_ d: Directory) async {
+        guard let downloads else { return }
+        do {
+            _ = try await downloads.downloadFile(d.feed, localPath: d.fileName(), overwrite: true, progress: false)
+            let parser = PodcastParser()
+            let items = await parser.parseRSSFeed(d)
+            _ = await merge(d, episodes: Array(items.prefix(10)), deferRefresh: false)
+        } catch {
+            print("Failed to refresh new podcast '\(d.name)': \(error)")
         }
     }
     
