@@ -103,17 +103,19 @@ struct PodcastItemActionsView: View {
             Text("\(item.prettySinceDate())")
             Spacer()
         
-            if item.fileSize(.audio).count == 0 {
+            if let progress = downloadStatus.progress(URL(string:item.audio)!) {
+                // Download in progress — background tasks write to a temp file so
+                // fileSize() returns "" the whole time; check this before fileSize.
+                ProgressBarView(progress:progress, title: "")
+                .onTapGesture {
+                    Task { await downloads.cancelDownload(item.audio) }
+                }
+            } else if item.fileSize(.audio).count == 0 {
                 Button {
                     Task { await downloads.startDownload(item) }
                 } label: {
                     Label("Download", systemImage: "arrow.down")
                 }.buttonStyle(.borderless)
-            } else if let progress = downloadStatus.progress(URL(string:item.audio)!) {
-                 ProgressBarView(progress:progress, title: "")
-                .onTapGesture {
-                    Task { await downloads.cancelDownload(item.audio) }
-                }
             } else {
                 if (item.audio == player.currentPodcast?.audio && player.isPlaying) {
                     ProgressBarView(progress:0.0,
@@ -161,23 +163,43 @@ struct PodcastItemActionsView: View {
     }
 }
     
+struct PendingPodcastRow: View {
+    var directory: Directory
+
+    var body: some View {
+        HStack {
+            AsyncImageView(url: directory.artwork, logo: false, width: 60)
+                .frame(width: 60, height: 60)
+            VStack(alignment: .leading) {
+                Text(directory.name).font(.headline)
+                Text(directory.artist).font(.subheadline).foregroundColor(.secondary)
+            }
+            Spacer()
+            ProgressView()
+        }
+        .padding(.vertical, 8)
+    }
+}
+
 struct PodcastListView: View {
     @EnvironmentObject var subscriptions: Subscriptions
     @State private var feed: [GroupedEpisodeList] = []
+    @State private var pendingPodcasts: [Directory] = []
     @State private var showOnboard = false
-    
+
     var body: some View {
         VStack {
             if showOnboard {
                 OnboardView()
             } else {
-                VStack {
-                    List(feed, children: \.children) {
-                        item in
+                List {
+                    ForEach(pendingPodcasts, id: \.persistentModelID) { dir in
+                        PendingPodcastRow(directory: dir)
+                    }
+                    OutlineGroup(feed, children: \.children) { item in
                         VStack {
                             PodcastItemView(item: item)
                             PodcastItemActionsView(item: item.episode)
-                            // Adding space at the bottom to account for permanent sheet.
                             if item.id == feed.last?.id {
                                 Spacer(minLength: 144)
                             }
@@ -195,21 +217,18 @@ struct PodcastListView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { object in
-            Task {
-                await load()
-            }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name.episodesChangedNotification)) { _ in
+            Task { await load() }
         }
         .task {
-            Task {
-                await load()
-            }
+            await load()
         }
     }
-    
+
     func load() async {
         feed = await subscriptions.loadFeed()
-        showOnboard = feed.count == 0 ? true : false
+        pendingPodcasts = await subscriptions.loadEmptyDirectories()
+        showOnboard = feed.isEmpty && pendingPodcasts.isEmpty
     }
 }
 
@@ -226,7 +245,6 @@ struct MainView: View {
     @State var showingClearCacheAlert = false
     @State var showingFeedback = false
     @State var showingSubscriptions = false
-    @State var showingTipJar = false
     @State private var presentationDetent = PresentationDetent.height(144.0)
     @State var themeColor = Color.clear
     @State var title = "Podcastle"
@@ -260,8 +278,12 @@ struct MainView: View {
                                 Button(action: { showingSubscriptions.toggle() }) {
                                     Label("Manage Podcasts", systemImage: "checklist")
                                 }
-                                Button(action: { showingTipJar.toggle() }) {
-                                    Label("Tip Jar", systemImage: "heart.fill")
+                                Button(action: {
+                                    if let url = URL(string: "https://www.alimentestaideia.pt/Donation") {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }) {
+                                    Label("Donate", systemImage: "heart.fill")
                                 }
                                 Button(action: { showingLog.toggle() }) {
                                     Label("View Log", systemImage: "list.bullet.rectangle.portrait")
@@ -279,7 +301,7 @@ struct MainView: View {
                     .sheet(isPresented:$showingPlayer) {
                         PlayerView(themeColor:$themeColor, title:$title, detent:$presentationDetent)
                             .presentationDetents ([.large, .height(144)], selection:$presentationDetent)
-                            //.presentationBackground(.black)
+                            .presentationBackground(.black)
                             .presentationBackgroundInteraction(.enabled)
                             .presentationDragIndicator(.visible)
                             .interactiveDismissDisabled()
@@ -301,11 +323,7 @@ struct MainView: View {
                                 ManagePodcastsView()
                                     .presentationDetents([.large])
                             }
-                            .sheet(isPresented: $showingTipJar) {
-                                TipJarView()
-                                    .presentationDetents([.medium])
-                            }
-                            .alert(isPresented: $showingClearCacheAlert) {
+.alert(isPresented: $showingClearCacheAlert) {
                                 Alert(
                                     title: Text("Confirm Clear Cache"),
                                     message: Text("This will delete every image and audio file"),

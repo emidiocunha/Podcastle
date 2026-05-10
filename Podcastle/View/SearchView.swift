@@ -143,18 +143,16 @@ struct SearchViewItem: View {
                     Button(action: {
                         guard !isAdding else { return }
                         isAdding = true
+                        dismiss()
                         if top {
-                            // Needs an iTunes lookup first — show spinner while that resolves
                             Task {
                                 if let entry = await directory.fetchTop(item, downloads: downloads) {
-                                    subscriptions.addPodcast(entry)
+                                    await subscriptions.addPodcast(entry)
                                 }
-                                dismiss()
                             }
                         } else {
                             Task {
-                                subscriptions.addPodcast(item)
-                                dismiss()
+                                await subscriptions.addPodcast(item)
                             }
                         }
                     }, label: {

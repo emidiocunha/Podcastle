@@ -104,6 +104,18 @@ struct GroupedEpisodeList:Identifiable {
         return feed
     }
     
+    /// Returns directories that have no episodes yet (e.g. still being fetched).
+    func loadEmptyDirectories() -> [Directory] {
+        do {
+            let allDirs = try context.fetch(FetchDescriptor<Directory>())
+            let allEpisodes = try context.fetch(FetchDescriptor<Episode>())
+            let populatedIDs = Set(allEpisodes.compactMap { $0.directory?.persistentModelID })
+            return allDirs.filter { !populatedIDs.contains($0.persistentModelID) }
+        } catch {
+            return []
+        }
+    }
+
     /// Returns the number of podcast directories.
     func podcastCount() async -> Int {
         return await podcastDirectory()?.count ?? 0
@@ -180,14 +192,10 @@ struct GroupedEpisodeList:Identifiable {
         return saveAndRefresh()
     }
     
-    /// Adds a podcast and refreshes only that podcast's feed immediately.
-    /// Using the full refresh() here would serially re-download every existing
-    /// subscription before getting to the new one, causing a long delay.
-    func addPodcast(_ directory:Directory) {
+    /// Adds a podcast and triggers a background refresh of that podcast's feed.
+    func addPodcast(_ directory: Directory) {
         _ = addDirectory(directory)
-        Task {
-            await refreshSingle(directory)
-        }
+        Task { await refreshSingle(directory) }
     }
 
     /// Downloads, parses and merges the feed for a single podcast directory.
@@ -195,12 +203,18 @@ struct GroupedEpisodeList:Identifiable {
     private func refreshSingle(_ d: Directory) async {
         guard let downloads else { return }
         do {
-            _ = try await downloads.downloadFile(d.feed, localPath: d.fileName(), overwrite: true, progress: false)
-            let parser = PodcastParser()
-            let items = await parser.parseRSSFeed(d)
-            _ = await merge(d, episodes: Array(items.prefix(10)), deferRefresh: false)
+            let (_, success) = try await downloads.downloadFile(d.feed, localPath: d.fileName(), overwrite: true, progress: false)
+            if success {
+                let parser = PodcastParser()
+                let items = await parser.parseRSSFeed(d)
+                _ = await merge(d, episodes: Array(items.prefix(10)), deferRefresh: false)
+            } else {
+                print("Feed download returned false for '\(d.name)'")
+                _ = saveAndRefresh()
+            }
         } catch {
             print("Failed to refresh new podcast '\(d.name)': \(error)")
+            _ = saveAndRefresh()
         }
     }
     

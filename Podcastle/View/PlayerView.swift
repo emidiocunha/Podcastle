@@ -326,7 +326,6 @@ struct PlayerView: View {
             }
             .environmentObject(player.playbackProgress)
             .foregroundColor(.white)
-            .background(AnyView(backgroundColor)).ignoresSafeArea(.all)
             .frame(maxWidth:.infinity)
             .animationsDisabled()
             .scrollDismissesKeyboard(.immediately)
@@ -357,6 +356,7 @@ struct PlayerView: View {
                 themeColor = detent == .large ? .clear : backgroundColor
             }
         }
+        .background(backgroundColor.ignoresSafeArea())
     }
     
     func fader(_ height:Double) -> Double {

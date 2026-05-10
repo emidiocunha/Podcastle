@@ -205,9 +205,17 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
                     didWriteData bytesWritten: Int64,
                     totalBytesWritten: Int64,
                     totalBytesExpectedToWrite: Int64) {
-        guard let url = downloadTask.originalRequest?.url,
-              totalBytesExpectedToWrite > 0 else { return }
-        let progress = floor(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) * 100.0)
+        guard let url = downloadTask.originalRequest?.url else { return }
+        let progress: Double
+        if totalBytesExpectedToWrite > 0 {
+            // Known content-length: report exact percentage
+            progress = floor(Double(totalBytesWritten) / Double(totalBytesExpectedToWrite) * 100.0)
+        } else {
+            // Content-Length unknown (server didn't send it): pulse between 0–90
+            // using a log scale so the bar moves visibly without implying 100%.
+            let mb = Double(totalBytesWritten) / 1_048_576.0
+            progress = min(90.0, floor(log2(mb + 1) * 15.0))
+        }
         onProgress?(url, progress)
     }
 
