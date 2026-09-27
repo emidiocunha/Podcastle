@@ -77,7 +77,11 @@ struct TranscriptView: View {
             }
             Spacer()
         }
-        VStack(alignment: .leading, spacing: 8.0) {
+        // Lazy so off-screen sentence rows skip layout entirely — this view sits inside
+        // PlayerView's ScrollView, and the transcript can grow to hundreds of rows while
+        // actively transcribing. A plain VStack here forced a full layout pass of every
+        // sentence on every single append, which is what made live updates feel sluggish.
+        LazyVStack(alignment: .leading, spacing: 8.0) {
             if !transcriber.working {
                 HStack {
                     Spacer()

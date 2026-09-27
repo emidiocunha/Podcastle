@@ -200,6 +200,8 @@ struct GroupedEpisodeList:Identifiable {
 
     /// Downloads, parses and merges the feed for a single podcast directory.
     /// Notifies the UI and starts the latest-episode download as soon as done.
+    /// Always marks the directory and notifies on failure/empty results so the
+    /// pending placeholder never spins forever once the attempt is done.
     private func refreshSingle(_ d: Directory) async {
         guard let downloads else { return }
         do {
@@ -207,13 +209,20 @@ struct GroupedEpisodeList:Identifiable {
             if success {
                 let parser = PodcastParser()
                 let items = await parser.parseRSSFeed(d)
-                _ = await merge(d, episodes: Array(items.prefix(10)), deferRefresh: false)
+                let inserted = await merge(d, episodes: Array(items.prefix(10)), deferRefresh: false)
+                if inserted.isEmpty {
+                    print("Feed for '\(d.name)' parsed with no usable episodes")
+                    d.fetchFailed = true
+                    _ = saveAndRefresh()
+                }
             } else {
                 print("Feed download returned false for '\(d.name)'")
+                d.fetchFailed = true
                 _ = saveAndRefresh()
             }
         } catch {
             print("Failed to refresh new podcast '\(d.name)': \(error)")
+            d.fetchFailed = true
             _ = saveAndRefresh()
         }
     }
@@ -284,22 +293,38 @@ struct GroupedEpisodeList:Identifiable {
         print("entered backgroundRefresh")
         if let podcasts = await podcastDirectory(), let downloads, podcasts.count > 0 {
             downloadCount = podcasts.count
+            // Only directories with zero episodes matter for fetchFailed — a podcast
+            // that already has episodes but got none new this cycle is not "failed".
+            let emptyBefore = Set(loadEmptyDirectories().map { $0.persistentModelID })
             var firstInsertedAcrossAll: [Episode] = []
             for p in podcasts {
                 do {
                     let (_, _) = try await downloads.downloadFile(p.feed, localPath:p.fileName(), overwrite:true, progress: false)
-                    
+
                     //let fileUrl = url ?? URL(string: p.fileName())
-                    
+
                     let parser = PodcastParser()
                     let items = await parser.parseRSSFeed(p)
                     let inserted = await merge(p, episodes: items, deferRefresh: true)
-                    firstInsertedAcrossAll.append(contentsOf: inserted)
-                    
+                    if emptyBefore.contains(p.persistentModelID) {
+                        // First-time backfill for this podcast (e.g. addPodcast's refreshSingle
+                        // hadn't finished yet when this refresh reached it) — only the latest
+                        // episode should auto-download, not the whole fetched history.
+                        if let latest = inserted.first {
+                            firstInsertedAcrossAll.append(latest)
+                        } else {
+                            p.fetchFailed = true
+                        }
+                    } else {
+                        firstInsertedAcrossAll.append(contentsOf: inserted)
+                    }
+
                     print("Processing \(p.feed)")
                 }
                 catch {
-                    
+                    if emptyBefore.contains(p.persistentModelID) {
+                        p.fetchFailed = true
+                    }
                 }
             }
             _ = saveAndRefresh()
@@ -308,24 +333,41 @@ struct GroupedEpisodeList:Identifiable {
             }
         }
     }
-    
+
     /// Refreshes podcast feeds.
     func refresh() async {
         print("refresh")
         if let podcasts = await podcastDirectory(), let downloads, podcasts.count > 0 {
             self.downloadCount = podcasts.count
+            // Only directories with zero episodes matter for fetchFailed — a podcast
+            // that already has episodes but got none new this cycle is not "failed".
+            let emptyBefore = Set(loadEmptyDirectories().map { $0.persistentModelID })
             var firstInsertedAcrossAll: [Episode] = []
             for p in podcasts {
                 do {
                     let (_, _) = try await downloads.downloadFile(p.feed, localPath:p.fileName(), overwrite:true, progress:false)
                     let parser = PodcastParser()
-                    
+
                     let items = await parser.parseRSSFeed(p)
                     let inserted = await merge(p, episodes:Array(items.prefix(10)), deferRefresh: true)
-                    firstInsertedAcrossAll.append(contentsOf: inserted)
-                    
+                    if emptyBefore.contains(p.persistentModelID) {
+                        // First-time backfill for this podcast (e.g. addPodcast's refreshSingle
+                        // hadn't finished yet when this refresh reached it) — only the latest
+                        // episode should auto-download, not the whole fetched history.
+                        if let latest = inserted.first {
+                            firstInsertedAcrossAll.append(latest)
+                        } else {
+                            p.fetchFailed = true
+                        }
+                    } else {
+                        firstInsertedAcrossAll.append(contentsOf: inserted)
+                    }
+
                     print("Processing \(p.feed)")
                 } catch {
+                    if emptyBefore.contains(p.persistentModelID) {
+                        p.fetchFailed = true
+                    }
                 }
             }
             // Save once and notify UI once to reduce render thrash

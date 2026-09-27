@@ -126,22 +126,33 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
     }
 
     // MARK: - Destination persistence (survives app kill / restart)
+    //
+    // register() writes from the Downloads actor's thread while the delegate methods below
+    // read/remove from the URLSession's own serial delegate queue — a different thread. All
+    // access to the shared "bgDownloads" dictionary goes through `lock` so concurrent
+    // downloads can't race and drop each other's persisted mapping.
 
     private func persistDestination(_ path: String, for taskID: Int) {
-        var map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
-        map[String(taskID)] = path
-        UserDefaults.standard.set(map, forKey: "bgDownloads")
+        lock.withLock {
+            var map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
+            map[String(taskID)] = path
+            UserDefaults.standard.set(map, forKey: "bgDownloads")
+        }
     }
 
     private func loadPersistedDestination(for taskID: Int) -> URL? {
-        let map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
-        return map[String(taskID)].map { URL(fileURLWithPath: $0) }
+        lock.withLock {
+            let map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
+            return map[String(taskID)].map { URL(fileURLWithPath: $0) }
+        }
     }
 
     private func removePersistedDestination(for taskID: Int) {
-        var map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
-        map.removeValue(forKey: String(taskID))
-        UserDefaults.standard.set(map, forKey: "bgDownloads")
+        lock.withLock {
+            var map = UserDefaults.standard.dictionary(forKey: "bgDownloads") as? [String: String] ?? [:]
+            map.removeValue(forKey: String(taskID))
+            UserDefaults.standard.set(map, forKey: "bgDownloads")
+        }
     }
 
     // MARK: - URLSessionDownloadDelegate
@@ -159,10 +170,16 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
         // Fall back to the persisted map when the app was woken from a kill
         let finalDest = destination ?? loadPersistedDestination(for: taskID)
 
+        // Reject non-2xx responses (error pages, auth walls, etc.) instead of silently
+        // saving them as if they were the episode audio — mirrors the check the
+        // foreground download(for:) path already performs.
+        let statusCode = (downloadTask.response as? HTTPURLResponse)?.statusCode
+        let responseOK = statusCode.map { (200..<300).contains($0) } ?? false
+
         // CRITICAL: move the temp file synchronously — iOS deletes it the moment this
         // method returns, so no async work can happen before the move.
         var success = false
-        if let dest = finalDest {
+        if let dest = finalDest, responseOK {
             let fm = FileManager.default
             do {
                 if fm.fileExists(atPath: dest.path) {
@@ -174,6 +191,8 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
             } catch {
                 print("Background download: failed to move file: \(error)")
             }
+        } else if let dest = finalDest {
+            print("Background download: bad response (\(statusCode.map(String.init) ?? "none")) for \(dest.lastPathComponent), discarding")
         } else {
             print("Background download: no destination for task \(taskID), file discarded")
         }

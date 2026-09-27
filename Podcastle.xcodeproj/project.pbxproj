@@ -35,6 +35,7 @@
 		B8B616702AFEAC9900297170 /* Print.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B6166F2AFEAC9900297170 /* Print.swift */; };
 		B8B616722B078AF000297170 /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B616712B078AF000297170 /* FeedbackView.swift */; };
 		B8B616762B0CB3EC00297170 /* ManagePodcastsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B616752B0CB3EC00297170 /* ManagePodcastsView.swift */; };
+		B8CAFE022E1234AB00CAFE02 /* CarPlayController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CAFE012E1234AB00CAFE01 /* CarPlayController.swift */; };
 		B8CC51422A4C0ACE0020F9CA /* Downloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CC51412A4C0ACE0020F9CA /* Downloads.swift */; };
 		B8EA1F9F2DD6659800EA56B2 /* PodcastleStore.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B8EA1F9E2DD6659800EA56B2 /* PodcastleStore.storekit */; };
 		B8FD223E2DBD8C2A00582C94 /* TranscriberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8FD223D2DBD8C2100582C94 /* TranscriberView.swift */; };
@@ -73,6 +74,7 @@
 		B8B6166F2AFEAC9900297170 /* Print.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Print.swift; sourceTree = "<group>"; };
 		B8B616712B078AF000297170 /* FeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackView.swift; sourceTree = "<group>"; };
 		B8B616752B0CB3EC00297170 /* ManagePodcastsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagePodcastsView.swift; sourceTree = "<group>"; };
+		B8CAFE012E1234AB00CAFE01 /* CarPlayController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayController.swift; sourceTree = "<group>"; };
 		B8CC51412A4C0ACE0020F9CA /* Downloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Downloads.swift; sourceTree = "<group>"; };
 		B8EA1F9E2DD6659800EA56B2 /* PodcastleStore.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = PodcastleStore.storekit; sourceTree = "<group>"; };
 		B8FC29092DEE166C006AFD86 /* mainscreen.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = mainscreen.png; sourceTree = "<group>"; };
@@ -136,6 +138,7 @@
 				B8FD223B2DBBC33300582C94 /* UI */,
 				B806BC072D6F400E0042A18E /* Database */,
 				B86906DC2C5E99BE00343237 /* MP3 File */,
+				B8CAFE002E1234AB00CAFE00 /* CarPlay */,
 				B86906DF2C5EACF500343237 /* Log */,
 				B851436B2A3116B1003ED322 /* Assets.xcassets */,
 				B8EA1F9E2DD6659800EA56B2 /* PodcastleStore.storekit */,
@@ -201,6 +204,14 @@
 				B8B616752B0CB3EC00297170 /* ManagePodcastsView.swift */,
 			);
 			path = View;
+			sourceTree = "<group>";
+		};
+		B8CAFE002E1234AB00CAFE00 /* CarPlay */ = {
+			isa = PBXGroup;
+			children = (
+				B8CAFE012E1234AB00CAFE01 /* CarPlayController.swift */,
+			);
+			path = CarPlay;
 			sourceTree = "<group>";
 		};
 		B8FD223B2DBBC33300582C94 /* UI */ = {
@@ -321,6 +332,7 @@
 				B85143682A3116B0003ED322 /* PodcastleApp.swift in Sources */,
 				B82725C92A8D10E300F01ABE /* ProgressViews.swift in Sources */,
 				B851437F2A3D0083003ED322 /* SearchView.swift in Sources */,
+				B8CAFE022E1234AB00CAFE02 /* CarPlayController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -456,15 +468,15 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Podcastle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Podcastle;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "VoiceFeed transcribes podcasts and needs your permission";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -473,7 +485,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -496,15 +508,15 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Podcastle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Podcastle;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "VoiceFeed transcribes podcasts and needs your permission";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
@@ -513,7 +525,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

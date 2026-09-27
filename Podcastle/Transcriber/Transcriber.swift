@@ -238,27 +238,37 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         return true
     }
     
+    // Builds every completed Sentence locally first and publishes once at the end.
+    // Appending to `sentences` (a @Published array) inside the loop fired a separate
+    // SwiftUI re-render — including a full layout pass of the growing transcript list —
+    // per sentence instead of per recognition result, which is what made the UI feel
+    // sluggish as the transcript grew longer.
     @MainActor func updateTimestamps(_ timestamps:[(String, TimeInterval)]) {
         var currentSentence = ""
         var sentenceTimestamp: TimeInterval = timestamps[0].1
-        
+        var nextID = allSentences.count
+        var newSentences: [Sentence] = []
+
         for (word, timestamp) in timestamps {
             currentSentence += " " + word
-            
+
             if word.contains(".") || word.contains("?") || word.contains("!") {
-                let new = Sentence(id:allSentences.count,sentence:currentSentence.trimmingCharacters(in: .whitespaces), timestamp:sentenceTimestamp)
-                allSentences.append(new)
-                sentences.append(new)
+                let new = Sentence(id:nextID,sentence:currentSentence.trimmingCharacters(in: .whitespaces), timestamp:sentenceTimestamp)
+                newSentences.append(new)
+                nextID += 1
                 sentenceTimestamp = timestamp
                 currentSentence = ""
             }
         }
-        
+
         if currentSentence.count > 0 {
-            let new = Sentence(id:allSentences.count,sentence:currentSentence.trimmingCharacters(in: .whitespaces), timestamp:sentenceTimestamp)
-            allSentences.append(new)
-            sentences.append(new)
+            let new = Sentence(id:nextID,sentence:currentSentence.trimmingCharacters(in: .whitespaces), timestamp:sentenceTimestamp)
+            newSentences.append(new)
         }
+
+        guard !newSentences.isEmpty else { return }
+        allSentences.append(contentsOf: newSentences)
+        sentences.append(contentsOf: newSentences)
     }
 
     func transcribeAudioFileWithTimestamps(at url: URL) async {

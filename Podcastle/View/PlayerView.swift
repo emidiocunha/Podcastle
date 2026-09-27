@@ -34,14 +34,18 @@ import WebKit
 import AVKit
 
 struct AudioOutputPickerView: UIViewRepresentable {
+    var tintColor: UIColor = .label
+
     func makeUIView(context: Context) -> AVRoutePickerView {
         let view = AVRoutePickerView()
         view.activeTintColor = .tintColor
-        view.tintColor = .gray
+        view.tintColor = tintColor
         return view
     }
 
-    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {
+        uiView.tintColor = tintColor
+    }
 }
 
 struct PlayerControlsView: View {
@@ -97,8 +101,8 @@ struct PlayerControlsView: View {
             }
             HStack {
                 Spacer()
-                AudioOutputPickerView()
-                                .frame(width: 30, height: 30)
+                AudioOutputPickerView(tintColor: backgroundColor == .clear ? .label : .white)
+                                .frame(width: 44, height: 44)
                                 .padding()
             }
         }

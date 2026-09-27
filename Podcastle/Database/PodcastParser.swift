@@ -67,6 +67,7 @@ class PodcastParser: NSObject, XMLParserDelegate {
     private var feed:String = ""
     
     private var completionHandler: @Sendable ([Episode]) async -> Void = { _ in }
+    private var didComplete = false
     
     private var altArtwork:String = ""
     private var nest:Bool = true
@@ -255,15 +256,28 @@ class PodcastParser: NSObject, XMLParserDelegate {
     
     // Called when the XML document parsing is complete.
     func parserDidEndDocument(_ parser: XMLParser) {
+        guard !didComplete else { return }
+        didComplete = true
         Task { [completionHandler, podcasts] in
             await completionHandler(podcasts)
         }
     }
-    
+
     // Called when a parsing error occurs.
+    // XMLParser never calls parserDidEndDocument after abortParsing(), so without this
+    // the completionHandler is never invoked and parseRSSFeed's continuation hangs forever
+    // — leaving the pending-podcast placeholder spinner stuck indefinitely.
+    // libxml2 can still report a trailing parse error after already calling
+    // parserDidEndDocument (e.g. junk after the root element), so guard against
+    // resuming the continuation twice, which is a fatal error.
     func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
         print("error \(parseError.localizedDescription)")
         parser.abortParsing()
+        guard !didComplete else { return }
+        didComplete = true
+        Task { [completionHandler, podcasts] in
+            await completionHandler(podcasts)
+        }
     }
 }
 

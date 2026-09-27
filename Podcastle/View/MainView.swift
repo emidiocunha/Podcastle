@@ -28,25 +28,93 @@
 //
 
 import SwiftUI
+import UIKit
 import Foundation
 import BackgroundTasks
 import StoreKit
 import SwiftData
+
+// UIView subclass that owns text layout; sizeThatFits is the single source of truth for SwiftUI.
+private final class FloatingLabelView: UIView {
+    static let imageSize: CGFloat = 100
+    static let spacing: CGFloat = 8
+
+    private let textView = UITextView()
+
+    var text: String = "" {
+        didSet { textView.text = text; invalidateIntrinsicContentSize() }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.isSelectable = false
+        textView.isUserInteractionEnabled = false
+        textView.backgroundColor = .clear
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.lineBreakMode = .byTruncatingTail
+        textView.textContainer.maximumNumberOfLines = 7
+        textView.textContainer.exclusionPaths = [
+            UIBezierPath(rect: CGRect(x: 0, y: 0,
+                                     width: Self.imageSize + Self.spacing,
+                                     height: Self.imageSize))
+        ]
+        textView.font = UIFont.preferredFont(forTextStyle: .title1)
+        textView.textColor = UIColor.label
+        addSubview(textView)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        textView.frame = bounds
+    }
+
+    // SwiftUI calls this to determine the view's size. We measure the text at the proposed
+    // width so the text container wraps correctly, then return the real content height.
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        let w = size.width > 0 ? size.width : UIScreen.main.bounds.width
+        textView.frame.size.width = w
+        let measured = textView.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude))
+        return CGSize(width: w, height: max(measured.height, Self.imageSize))
+    }
+
+    override var intrinsicContentSize: CGSize {
+        sizeThatFits(CGSize(width: bounds.width, height: 0))
+    }
+}
+
+private struct FloatingTitleView: UIViewRepresentable {
+    let title: String
+
+    func makeUIView(context: Context) -> FloatingLabelView {
+        let v = FloatingLabelView()
+        v.text = title
+        v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return v
+    }
+
+    func updateUIView(_ uiView: FloatingLabelView, context: Context) {
+        if uiView.text != title { uiView.text = title }
+    }
+}
 
 struct PodcastItemView: View {
     var item:GroupedEpisodeList
     @EnvironmentObject var player:PodcastPlayer
     @EnvironmentObject var transcriber:Transcriber
     @State var showTranscriberAlert:Bool = false
-    @State private var height: CGFloat?
-    
+
     var body: some View {
         VStack(alignment: .leading) {
             if item.children != nil {
-                HStack(alignment: .top) {
-                    AsyncImageView(url:item.episode.artwork, logo: false, width:100)
-                        .frame(width:100, height:100)
-                    Text(item.episode.title).font(.title).frame(maxHeight:.infinity, alignment: .top).padding(EdgeInsets(top: -4, leading: 0, bottom: 0, trailing: 0))
+                ZStack(alignment: .topLeading) {
+                    FloatingTitleView(title: item.episode.title)
+                    AsyncImageView(url: item.episode.artwork, logo: false, width: 100)
+                        .frame(width: 100, height: 100)
                 }
             }
             else
@@ -165,6 +233,7 @@ struct PodcastItemActionsView: View {
     
 struct PendingPodcastRow: View {
     var directory: Directory
+    @EnvironmentObject var subscriptions: Subscriptions
 
     var body: some View {
         HStack {
@@ -172,10 +241,22 @@ struct PendingPodcastRow: View {
                 .frame(width: 60, height: 60)
             VStack(alignment: .leading) {
                 Text(directory.name).font(.headline)
-                Text(directory.artist).font(.subheadline).foregroundColor(.secondary)
+                if directory.fetchFailed {
+                    Text("Couldn't load episodes").font(.subheadline).foregroundColor(.secondary)
+                } else {
+                    Text(directory.artist).font(.subheadline).foregroundColor(.secondary)
+                }
             }
             Spacer()
-            ProgressView()
+            if directory.fetchFailed {
+                Button {
+                    Task { await subscriptions.removePodcast(directory) }
+                } label: {
+                    Image(systemName: "exclamationmark.triangle").foregroundColor(.orange)
+                }.buttonStyle(.borderless)
+            } else {
+                ProgressView()
+            }
         }
         .padding(.vertical, 8)
     }

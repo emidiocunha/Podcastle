@@ -56,6 +56,8 @@ import SwiftData
     // Helper Objects
     private let audioPlayer = AVPlayer()
     private var isAudioSessionActive = false
+    private var seekInProgress = false
+    private var shouldPlayAfterSeek = false
     private var timeObserverToken: Any?
     private var file:PodcastFile?
     private var subscriptions:Subscriptions?
@@ -128,8 +130,10 @@ import SwiftData
             rate = r
         }
         image = nil
+        seekInProgress = false
+        shouldPlayAfterSeek = false
     }
-    
+
     // Replaces current podcast with new one
     func setPodcast(_ podcast:Episode) -> Bool {
         guard podcast.fileSize(.audio).count > 0 else {
@@ -173,7 +177,20 @@ import SwiftData
             audioPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
             progress = currentPodcast.position
             playbackProgress.value = currentPodcast.position
-            audioPlayer.seek(to:CMTimeMakeWithSeconds(currentPodcast.position, preferredTimescale:Int32(NSEC_PER_SEC)))
+            let targetPosition = currentPodcast.position
+            if targetPosition > 0 {
+                seekInProgress = true
+                audioPlayer.seek(to: CMTimeMakeWithSeconds(targetPosition, preferredTimescale: Int32(NSEC_PER_SEC))) { [weak self] finished in
+                    guard let self else { return }
+                    Task { @MainActor in
+                        self.seekInProgress = false
+                        if finished && self.shouldPlayAfterSeek {
+                            self.shouldPlayAfterSeek = false
+                            self.play()
+                        }
+                    }
+                }
+            }
             duration = currentPodcast.duration
             secondsLeft = (duration) - progress
             if currentPodcast.duration == 0 {
@@ -509,6 +526,7 @@ import SwiftData
         switch type {
         case .began:
             pause()
+            isAudioSessionActive = false
         case .ended:
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
@@ -523,29 +541,61 @@ import SwiftData
     }
             
     func play() {
-        if let currentPodcast = currentPodcast {
-            guard currentPodcast.audio.count > 0 else { return }
-            
-            self.objectWillChange.send()
-            do {
-                if !isAudioSessionActive {
-                    try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    isAudioSessionActive = true
-                }
-            } catch {
-                print(error)
-            }
-            let r = rate
-            audioPlayer.rate = r
-            audioPlayer.playImmediately(atRate: r)
-            if timeObserverToken == nil { addPeriodicTimeObserver() }
-            setupNowPlaying()
-            isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
-            MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+        guard let currentPodcast = currentPodcast, currentPodcast.audio.count > 0 else { return }
+        if seekInProgress {
+            shouldPlayAfterSeek = true
+            return
+        }
+        self.objectWillChange.send()
+        guard !isAudioSessionActive else {
+            beginPlayback()
+            return
+        }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
+        } catch {
+            print(error)
+        }
+        activateAudioSession { [weak self] activated in
+            guard let self else { return }
+            self.isAudioSessionActive = activated
+            self.beginPlayback()
         }
     }
-    
+
+    private func beginPlayback() {
+        let r = rate
+        audioPlayer.rate = r
+        audioPlayer.playImmediately(atRate: r)
+        if timeObserverToken == nil { addPeriodicTimeObserver() }
+        setupNowPlaying()
+        isPlaying = audioPlayer.rate != 0 && audioPlayer.error == nil
+        MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+    }
+
+    // AVAudioSession.setActive(true) is a synchronous, potentially slow call — doing it on the
+    // main thread trips AVAudioSession_iOS's "can lead to UI unresponsiveness" runtime warning.
+    // iOS 27 added a genuinely async activate(options:completionHandler:); on older OS versions
+    // there is no non-blocking alternative, so the old call is pushed to a background thread instead.
+    private func activateAudioSession(completion: @escaping (Bool) -> Void) {
+        if #available(iOS 27.0, *) {
+            AVAudioSession.sharedInstance().activate(options: []) { activated, error in
+                if let error { print(error) }
+                Task { @MainActor in completion(activated) }
+            }
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    Task { @MainActor in completion(true) }
+                } catch {
+                    print(error)
+                    Task { @MainActor in completion(false) }
+                }
+            }
+        }
+    }
+
     func pause() {
         self.objectWillChange.send()
         audioPlayer.pause()
@@ -558,11 +608,30 @@ import SwiftData
         audioPlayer.pause()
         isPlaying = false
         MPNowPlayingInfoCenter.default().playbackState = .paused
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-            isAudioSessionActive = false
-        } catch {
-            print(error)
+        deactivateAudioSession { [weak self] deactivated in
+            if deactivated {
+                self?.isAudioSessionActive = false
+            }
+        }
+    }
+
+    // See activateAudioSession above — same rationale, applied to deactivation.
+    private func deactivateAudioSession(completion: @escaping (Bool) -> Void) {
+        if #available(iOS 27.0, *) {
+            AVAudioSession.sharedInstance().deactivate(options: [.notifyOthersOnDeactivation]) { deactivated, error in
+                if let error { print(error) }
+                Task { @MainActor in completion(deactivated) }
+            }
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+                    Task { @MainActor in completion(true) }
+                } catch {
+                    print(error)
+                    Task { @MainActor in completion(false) }
+                }
+            }
         }
     }
 

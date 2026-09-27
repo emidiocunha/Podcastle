@@ -31,7 +31,6 @@ import SwiftUI
 import Speech
 import BackgroundTasks
 import SwiftData
-
 // Change as needed for your bundle IDs
 public let kAppRefreshIdentifier = "com.mobyte.voicefeed.Refresh"
 public let kBackgroundIdentifier = "com.mobyte.voicefeed.backgroundDownload"
@@ -81,6 +80,9 @@ struct PodcastleApp: App {
                             await downloads.setup(status: downloadStatus)
                             player.setup(subscriptions: subscriptions, transcriber: transcriber, file:file, downloads:downloads)
                             appDelegate.registerDownloads(downloads)
+                            CarPlayController.shared.player = player
+                            CarPlayController.shared.file = file
+                            CarPlayController.shared.subscriptions = subscriptions
                         } catch {
                             print("Could not initialize: \(error)")
                         }
@@ -123,9 +125,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     private var subscriptions:Subscriptions?
     private var downloads:Downloads?
+    // Set when iOS relaunches the app in the background to deliver background URLSession
+    // events before PodcastleApp's async setup task has finished and called registerDownloads.
+    // Flushed as soon as downloads becomes available so the completion handler is never dropped.
+    private var pendingBackgroundSessionCompletion: (identifier: String, handler: () -> Void)?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     )  -> Bool {
+        _ = CarPlaySceneDelegate.self  // prevent linker dead-stripping
+        let cls = NSClassFromString("CarPlaySceneDelegate")
+        print("🚗 launch: CarPlaySceneDelegate class = \(String(describing: cls))")
         registerBackgroundTasks()
         scheduleAppRefresh()
         return true
@@ -137,9 +146,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func registerDownloads(_ d:Downloads) {
         downloads = d
+        // Flush a handoff that arrived before PodcastleApp's async setup finished —
+        // otherwise the completion handler would be dropped forever (see below).
+        if let pending = pendingBackgroundSessionCompletion {
+            pendingBackgroundSessionCompletion = nil
+            Task {
+                await d.setBackgroundCompletionHandler(pending.handler)
+            }
+        }
     }
 
-    // iOS calls this when a background URLSession has events to deliver.
+    // iOS calls this when a background URLSession has events to deliver. This can happen
+    // as soon as the app is relaunched into the background — potentially before
+    // PodcastleApp's async setup task has run and called registerDownloads(), in which case
+    // `downloads` is still nil here. Buffer the handoff instead of dropping it: failing to
+    // ever call completionHandler gets the app penalized by iOS, and skipping
+    // setBackgroundCompletionHandler means the background session/delegate never
+    // reconnects, so pending download-completion events are never delivered either.
     // We must create/reconnect to the same session and call the completion
     // handler only after urlSessionDidFinishEvents fires — telling iOS the
     // app is done processing so it can take a new snapshot.
@@ -150,8 +173,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             completionHandler()
             return
         }
+        guard let downloads else {
+            pendingBackgroundSessionCompletion = (identifier, completionHandler)
+            return
+        }
         Task {
-            await downloads?.setBackgroundCompletionHandler(completionHandler)
+            await downloads.setBackgroundCompletionHandler(completionHandler)
         }
     }
 

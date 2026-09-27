@@ -7,12 +7,27 @@
 		<string>com.mobyte.voicefeed.Refresh</string>
 		<string>com.mobyte.voicefeed.backgroundDownload</string>
 	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
+	</dict>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>CarPlay Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
 	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
