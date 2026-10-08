@@ -39,9 +39,11 @@
 		B8CC51422A4C0ACE0020F9CA /* Downloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8CC51412A4C0ACE0020F9CA /* Downloads.swift */; };
 		B8EA1F9F2DD6659800EA56B2 /* PodcastleStore.storekit in Resources */ = {isa = PBXBuildFile; fileRef = B8EA1F9E2DD6659800EA56B2 /* PodcastleStore.storekit */; };
 		B8FD223E2DBD8C2A00582C94 /* TranscriberView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8FD223D2DBD8C2100582C94 /* TranscriberView.swift */; };
+		CD5B9612D1DB83C9C0F756FC /* SummarySpeaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = B57B79299F4A1CC783435632 /* SummarySpeaker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B57B79299F4A1CC783435632 /* SummarySpeaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummarySpeaker.swift; sourceTree = "<group>"; };
 		B806BBF92D6F3E880042A18E /* Migration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migration.swift; sourceTree = "<group>"; };
 		B806BC032D6F40090042A18E /* Directory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Directory.swift; sourceTree = "<group>"; };
 		B806BC042D6F40090042A18E /* Episode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Episode.swift; sourceTree = "<group>"; };
@@ -180,6 +182,7 @@
 			children = (
 				B8FD223D2DBD8C2100582C94 /* TranscriberView.swift */,
 				B87E48BC2A72E32B002D1E95 /* Transcriber.swift */,
+				B57B79299F4A1CC783435632 /* SummarySpeaker.swift */,
 			);
 			path = Transcriber;
 			sourceTree = "<group>";
@@ -327,6 +330,7 @@
 				B8752DF02DD65A1B00189AAC /* TipJarView.swift in Sources */,
 				B85143782A379134003ED322 /* Imagery.swift in Sources */,
 				B8FD223E2DBD8C2A00582C94 /* TranscriberView.swift in Sources */,
+				CD5B9612D1DB83C9C0F756FC /* SummarySpeaker.swift in Sources */,
 				B851437A2A3A2FE9003ED322 /* Player.swift in Sources */,
 				B8752DEE2DD3B8CF00189AAC /* OnboardView.swift in Sources */,
 				B85143682A3116B0003ED322 /* PodcastleApp.swift in Sources */,
@@ -468,7 +472,7 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -485,7 +489,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -508,7 +512,7 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -525,7 +529,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9;
+				MARKETING_VERSION = 2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

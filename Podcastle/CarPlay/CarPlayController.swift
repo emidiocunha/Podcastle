@@ -52,15 +52,23 @@ class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate {
 }
 
 // Bridges PodcastPlayer + PodcastFile to the CarPlay template hierarchy.
-// Root template: CPNowPlayingTemplate (artwork + transport controls via MPNowPlayingInfoCenter).
-// Secondary template: CPListTemplate with all chapters; current chapter marked with a speaker icon.
+// Root template: CPListTemplate of podcasts. CPNowPlayingTemplate (artwork + transport
+// controls via MPNowPlayingInfoCenter) is pushed on top of it — Apple only supports
+// pushing the shared Now Playing template, not making it the root. With it as root,
+// anything pushed above it (the podcasts list) could get popped right back off the
+// first time the system itself brought Now Playing forward.
+// Chapters: CPListTemplate pushed above Now Playing; current chapter marked with a speaker icon.
 @MainActor
 final class CarPlayController {
     static let shared = CarPlayController()
     private init() {}
 
     var player: PodcastPlayer?
-    var subscriptions: Subscriptions?
+    var subscriptions: Subscriptions? {
+        // On a cold launch from CarPlay, connect() can run before the app's setup
+        // has handed these over — fill the root list in once they arrive.
+        didSet { refreshPodcastsList() }
+    }
 
     var file: PodcastFile? {
         didSet {
@@ -70,6 +78,7 @@ final class CarPlayController {
     }
 
     private var interfaceController: CPInterfaceController?
+    private var podcastsTemplate: CPListTemplate?
     private var chapterTemplate: CPListTemplate?
     private var cancellables = Set<AnyCancellable>()
 
@@ -78,12 +87,33 @@ final class CarPlayController {
     func connect(_ controller: CPInterfaceController) {
         interfaceController = controller
         refreshNowPlayingButtons()
-        controller.setRootTemplate(CPNowPlayingTemplate.shared, animated: false, completion: nil)
+        let root = CPListTemplate(title: "Podcasts", sections: [])
+        podcastsTemplate = root
+        controller.setRootTemplate(root, animated: false, completion: nil)
+        refreshPodcastsList()
+        // Land on Now Playing, as before, when there's an episode loaded.
+        if player?.currentPodcast != nil {
+            showNowPlaying(animated: false)
+        }
     }
 
     func disconnect() {
         interfaceController = nil
+        podcastsTemplate = nil
         chapterTemplate = nil
+    }
+
+    private func showNowPlaying(animated: Bool) {
+        guard let interfaceController else { return }
+        let nowPlaying = CPNowPlayingTemplate.shared
+        // Pushing a template that's already on the stack is an error in CarPlay.
+        if interfaceController.templates.contains(where: { $0 === nowPlaying }) {
+            if interfaceController.topTemplate !== nowPlaying {
+                interfaceController.pop(to: nowPlaying, animated: animated, completion: nil)
+            }
+        } else {
+            interfaceController.pushTemplate(nowPlaying, animated: animated, completion: nil)
+        }
     }
 
     // MARK: - Now Playing supplementary buttons
@@ -110,17 +140,19 @@ final class CarPlayController {
 
     // MARK: - Podcasts list template
 
+    // The podcasts list is the root, sitting under Now Playing — going back to it
+    // is a pop, never a push.
     private func pushPodcastsList() {
-        guard let subscriptions else { return }
-        Task { @MainActor in
-            let feed = await subscriptions.loadFeed()
-            let template = self.buildPodcastsTemplate(from: feed)
-            self.interfaceController?.pushTemplate(template, animated: true, completion: nil)
-        }
+        refreshPodcastsList()
+        interfaceController?.popToRootTemplate(animated: true, completion: nil)
     }
 
-    private func buildPodcastsTemplate(from feed: [GroupedEpisodeList]) -> CPListTemplate {
-        CPListTemplate(title: "Podcasts", sections: [CPListSection(items: makePodcastItems(from: feed))])
+    private func refreshPodcastsList() {
+        guard let subscriptions, let template = podcastsTemplate else { return }
+        Task { @MainActor in
+            let feed = await subscriptions.loadFeed()
+            template.updateSections([CPListSection(items: self.makePodcastItems(from: feed))])
+        }
     }
 
     private func makePodcastItems(from feed: [GroupedEpisodeList]) -> [CPListItem] {
@@ -134,7 +166,7 @@ final class CarPlayController {
                     guard let self, let player = self.player else { completion(); return }
                     if player.setPodcast(episode) {
                         player.play()
-                        self.interfaceController?.popToRootTemplate(animated: true, completion: nil)
+                        self.showNowPlaying(animated: true)
                     }
                     completion()
                 }

@@ -33,14 +33,61 @@ import AVFoundation
 import SwiftData
 
 extension String {
+    // Was NSAttributedString(data:options:[.documentType: .html],...) — that API
+    // is backed by a legacy, single shared WebKit "Web Thread" (NSHTMLReader) that
+    // is NOT safe to call off the main thread or concurrently with itself. This
+    // runs during RSS parsing on Subscriptions' actor executor (a background
+    // thread), once per feed item's title and summary — on every single refresh.
+    // That's exactly the misuse that caused a real TestFlight crash: an
+    // EXC_BAD_ACCESS deep in WebCore::DocumentLoader whenever it happened to
+    // overlap with another HTML-to-NSAttributedString conversion elsewhere (e.g.
+    // PlayerView rendering an episode's description on the main thread at the same
+    // moment). title/summary are plain-text fields (unlike desc, which goes
+    // through sanitizeHTML to keep a small whitelist for rich display), so this
+    // just needs to end up as clean text — strip any real markup and unescape
+    // entities, all as pure string manipulation with no WebKit involved, safe to
+    // call from anywhere, concurrently or not.
     var htmlDecoded: String {
-        guard let data = self.data(using: .utf8) else { return self }
-        let opts: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-            .documentType: NSAttributedString.DocumentType.html,
-            .characterEncoding: String.Encoding.utf8.rawValue
-        ]
-        return (try? NSAttributedString(data: data, options: opts, documentAttributes: nil))?.string ?? self
+        guard contains("&") || contains("<") else { return self }
+        var result = self
+
+        // Strip real markup first, on the raw (not-yet-entity-decoded) string —
+        // otherwise literal "<"/">" produced by decoding &lt;/&gt; just below
+        // could get mistaken for tags and stripped right back out.
+        if result.contains("<") {
+            result = result.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+        }
+
+        // Numeric character references: &#NNN; (decimal) and &#xHH;/&#XHH; (hex).
+        if let regex = try? NSRegularExpression(pattern: "&#([xX]?)([0-9A-Fa-f]+);") {
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range, in: result),
+                      let hexFlagRange = Range(match.range(at: 1), in: result),
+                      let digitsRange = Range(match.range(at: 2), in: result) else { continue }
+                let isHex = !result[hexFlagRange].isEmpty
+                guard let codePoint = UInt32(result[digitsRange], radix: isHex ? 16 : 10),
+                      let scalar = Unicode.Scalar(codePoint) else { continue }
+                result.replaceSubrange(fullRange, with: String(Character(scalar)))
+            }
+        }
+
+        // Named entities actually seen in real-world podcast feed titles/summaries
+        // — &amp; last, so a literal "&amp;lt;" (wanting to show "&lt;" as text)
+        // isn't double-unescaped into "<".
+        for (entity, replacement) in String.namedHTMLEntities where result.contains(entity) {
+            result = result.replacingOccurrences(of: entity, with: replacement)
+        }
+        return result
     }
+
+    private static let namedHTMLEntities: [(String, String)] = [
+        ("&nbsp;", "\u{00A0}"), ("&mdash;", "—"), ("&ndash;", "–"), ("&hellip;", "…"),
+        ("&lsquo;", "‘"), ("&rsquo;", "’"), ("&ldquo;", "“"), ("&rdquo;", "”"),
+        ("&copy;", "©"), ("&reg;", "®"), ("&trade;", "™"),
+        ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&apos;", "'"),
+        ("&amp;", "&"),
+    ]
 }
 
 enum PodcastURLType {

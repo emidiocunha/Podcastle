@@ -8,10 +8,7 @@
   "groups" : [
     {
       "layers" : [
-        {
-          "image-name" : "Group 2.png",
-          "name" : "Group 2"
-        }
+
       ],
       "shadow" : {
         "kind" : "neutral",
@@ -20,6 +17,22 @@
       "translucency" : {
         "enabled" : true,
         "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "c2-foreground.svg",
+          "name" : "c2-foreground"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
       }
     }
   ],

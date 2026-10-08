@@ -6,6 +6,7 @@
 	<array>
 		<string>com.mobyte.voicefeed.Refresh</string>
 		<string>com.mobyte.voicefeed.backgroundDownload</string>
+		<string>com.mobyte.voicefeed.transcribe</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

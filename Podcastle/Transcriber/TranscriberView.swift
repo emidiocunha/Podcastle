@@ -37,6 +37,7 @@ struct TranscriptView: View {
     @State var searchString = ""
     @State var limit = 10
     @State private var showDeleteConfirm = false
+    @StateObject private var summarySpeaker = SummarySpeaker()
 
     var body: some View {
         VStack {
@@ -82,6 +83,34 @@ struct TranscriptView: View {
         // actively transcribing. A plain VStack here forced a full layout pass of every
         // sentence on every single append, which is what made live updates feel sluggish.
         LazyVStack(alignment: .leading, spacing: 8.0) {
+            if !transcriber.working && !transcriber.summary.isEmpty {
+                VStack(alignment: .leading, spacing: 6.0) {
+                    HStack {
+                        Text("Summary").font(.headline)
+                        Spacer()
+                        Button(action: {
+                            // Starting playback and speech at once would talk over
+                            // the episode itself — pause it first. Stopping speech
+                            // doesn't touch playback, so the user stays in control
+                            // of resuming it themselves.
+                            if !summarySpeaker.isSpeaking && player.isPlaying {
+                                player.pause()
+                            }
+                            summarySpeaker.toggle(transcriber.summary, language: transcriber.language)
+                        }) {
+                            Image(systemName: summarySpeaker.isSpeaking ? "stop.circle.fill" : "play.circle.fill")
+                                .font(.title2)
+                        }
+                    }
+                    Text(transcriber.summary).font(.body)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(Color.white.opacity(0.08))
+                .cornerRadius(8.0)
+                .padding(.bottom, 8.0)
+                .onDisappear { summarySpeaker.stop() }
+            }
             if !transcriber.working {
                 HStack {
                     Spacer()
@@ -149,24 +178,10 @@ struct TranscriptView: View {
     
     func transcribe() async {
         if let currentPodcast = player.currentPodcast {
+            // Player.setPodcast's load() call already detected and set the
+            // episode's language before this could ever run.
             let localUrl = currentPodcast.fullLocalUrl(.audio)!
-            
-            transcriber.setLanguage(detectLanguage())
             await transcriber.transcribe(localUrl)
         }
-    }
-    
-    func detectLanguage() -> String {
-        if let currentPodcast = player.currentPodcast {
-            let recognizer = NLLanguageRecognizer()
-            recognizer.processString(currentPodcast.title + "\n\n" + currentPodcast.desc)
-            
-            if let languageCode = recognizer.dominantLanguage?.rawValue {
-                let detectedLanguage = languageCode
-                print("Detected language \(detectedLanguage)")
-                return detectedLanguage
-            }
-        }
-        return "en_US"
     }
 }

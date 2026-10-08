@@ -46,6 +46,15 @@ import SwiftData
     var isPlaying:Bool = false
     var title:String = ""
     var image:UIImage? = nil
+    // The artwork last published to Now Playing, and what it was built from (the
+    // chapter image, or the episode's cover file). setupNowPlaying rebuilds the
+    // whole info dictionary on every play — without reusing this, an episode
+    // with no chapter image went out with no artwork until the cover was
+    // reloaded from disk, which flashed the lock screen artwork away and back.
+    // Reusing the same MPMediaItemArtwork object also spares the lock screen a
+    // redraw when nothing actually changed.
+    private var nowPlayingArtwork:MPMediaItemArtwork?
+    private var nowPlayingArtworkSource:AnyHashable?
     var secondsLeft:Double = 0.0
     var currentPodcast:Episode?
 
@@ -56,6 +65,14 @@ import SwiftData
     // Helper Objects
     private let audioPlayer = AVPlayer()
     private var isAudioSessionActive = false
+    // play() flips this synchronously before kicking off activateAudioSession's
+    // async completion — isAudioSessionActive itself only becomes true inside
+    // that completion, so without a separate synchronous guard, a second play()
+    // landing before the first one's activation finishes (a fast double-tap, or
+    // a remote-command-center Play racing a UI tap) would also see
+    // isAudioSessionActive == false and kick off a second concurrent
+    // activation + beginPlayback() for what was really one user action.
+    private var isActivatingAudioSession = false
     private var seekInProgress = false
     private var shouldPlayAfterSeek = false
     private var timeObserverToken: Any?
@@ -72,7 +89,7 @@ import SwiftData
                 object: self.audioPlayer.currentItem
             ) {
                 Task { @MainActor in
-                    self.pause()
+                    await self.handlePlaybackEnded()
                 }
             }
         }
@@ -152,12 +169,30 @@ import SwiftData
         }
         UserDefaults.standard.set(podcast.audio, forKey: "currentPodcast")
         transcriber?.reset()
-        _ = transcriber?.load(podcast.fullLocalUrl(.audio))
+        _ = transcriber?.load(podcast.fullLocalUrl(.audio), title: podcast.title, desc: podcast.desc, episodeAudioURL: podcast.audio)
         setupChapters()
         startPlaying()
         return true
     }
-    
+
+    // "Continue Playing" (More menu, on by default) — when an episode finishes
+    // naturally, auto-advance to the most recent downloaded episode that isn't
+    // played yet, instead of just stopping. Falls back to pausing, same as
+    // before this existed, if it's off or there's nothing left to play.
+    func handlePlaybackEnded() async {
+        guard UserDefaults.standard.bool(forKey: kContinuePlayingEnabledKey),
+              let subscriptions,
+              let next = await subscriptions.mostRecentUnplayedDownloadedEpisode(excluding: currentPodcast) else {
+            pause()
+            return
+        }
+        if setPodcast(next) {
+            play()
+        } else {
+            pause()
+        }
+    }
+
     // Local audio file location
     func audioFileURL() -> URL? {
         return currentPodcast?.fullLocalUrl(.audio)
@@ -258,24 +293,39 @@ import SwiftData
     func seek(_ seconds:Double) {
         if let currentPodcast = currentPodcast {
             guard currentPodcast.audio.count > 0 else { return }
-            
+
             var n = progress + seconds
-            
+
             // Check for boundaries, beginning and end of file
             if n < 0 {
                 n = 0
             } else {
                 let d = duration
-                
+
                 if n > d {
                     n = d
                 }
             }
-            audioPlayer.seek(to:CMTimeMakeWithSeconds(n, preferredTimescale:Int32(NSEC_PER_SEC)))
+            // seekInProgress (checked by addPeriodicTimeObserver below) stops the
+            // 1s-interval observer from clobbering this with a stale pre-seek
+            // reading before AVPlayer's seek actually lands — without it, the
+            // progress bar would visibly jump back to the old position for a tick
+            // before correcting itself to n.
+            seekInProgress = true
             progress = n
             playbackProgress.value = n
             file?.updateCurrentChapter(n)
             updateImage()
+            audioPlayer.seek(to: CMTimeMakeWithSeconds(n, preferredTimescale: Int32(NSEC_PER_SEC))) { [weak self] finished in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.seekInProgress = false
+                    if finished && self.shouldPlayAfterSeek {
+                        self.shouldPlayAfterSeek = false
+                        self.play()
+                    }
+                }
+            }
         }
     }
     
@@ -296,7 +346,14 @@ import SwiftData
             Task { @MainActor in
                 // Cohalesce multiple variables update with this send
                 // self.objectWillChange.send()
-                
+
+                // A seek() is already showing its own target position optimistically
+                // (and will clear this itself once AVPlayer confirms it landed) — a
+                // periodic tick landing in between would otherwise report a stale
+                // pre-seek time and visibly snap the progress bar backward for a
+                // moment before the next tick corrected it.
+                guard !self.seekInProgress else { return }
+
                 // Update chapter information
                 if let c = self.file?.currentChapter, time.seconds > Double(c.endTime / 1000) {
                     self.file?.updateCurrentChapter(time.seconds)
@@ -404,27 +461,10 @@ import SwiftData
         if let currentPodcast = currentPodcast {
             nowPlayingInfo[MPMediaItemPropertyTitle] = currentPodcast.title
             nowPlayingInfo[MPMediaItemPropertyArtist] = currentPodcast.author
-            // Set artwork if we already have it in memory; otherwise update asynchronously
-            if let image = image {
-                nowPlayingInfo[MPMediaItemPropertyArtwork] =
-                MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-            } else if let localUrl = currentPodcast.fullLocalUrl(.artwork) {
-                // Defer disk I/O off the main actor to avoid UI hitch during play/pause
-                Task.detached { [weak self] in
-                    guard let self else { return }
-                    do {
-                        let data = try Data(contentsOf: localUrl)
-                        if let img = UIImage(data: data) {
-                            await MainActor.run {
-                                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? nowPlayingInfo
-                                updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-                                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                            }
-                        }
-                    } catch {
-                        // Ignore artwork failure; keep playing
-                    }
-                }
+            if let artwork = readyNowPlayingArtwork() {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
+            } else {
+                loadNowPlayingArtwork()
             }
 
             if let item = audioPlayer.currentItem {
@@ -441,33 +481,62 @@ import SwiftData
     
     @MainActor
     func updateNowPlayingArtwork() {
-        // Set artwork if we already have it in memory; otherwise update asynchronously
-        if let currentPodcast = currentPodcast {
+        guard currentPodcast != nil else { return }
+        if let artwork = readyNowPlayingArtwork() {
             var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-            
-            if let image = image {
-                info[MPMediaItemPropertyArtwork] =
-                MPMediaItemArtwork(boundsSize: image.size) { _ in image }
-                MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-            } else if let localUrl = currentPodcast.fullLocalUrl(.artwork) {
-                // Defer disk I/O off the main actor to avoid UI hitch during play/pause
-                Task.detached { [weak self] in
-                    guard let self else { return }
-                    do {
-                        let data = try Data(contentsOf: localUrl)
-                        if let img = UIImage(data: data) {
-                            await MainActor.run {
-                                var updated = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? info
-                                updated[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
-                                MPNowPlayingInfoCenter.default().nowPlayingInfo = updated
-                            }
-                        }
-                    } catch {
-                        // Ignore artwork failure; keep playing
-                    }
-                }
-            }
+            guard (info[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork) !== artwork else { return }
+            info[MPMediaItemPropertyArtwork] = artwork
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        } else {
+            loadNowPlayingArtwork()
         }
+    }
+
+    // What the Now Playing artwork should currently be built from: the chapter
+    // image when there is one, otherwise the episode's cover file.
+    private var nowPlayingArtworkSourceKey:AnyHashable? {
+        if let image { return ObjectIdentifier(image) }
+        return currentPodcast?.fullLocalUrl(.artwork)
+    }
+
+    // Artwork that's available without disk I/O — the cached one if its source
+    // hasn't changed, or one built from the in-memory chapter image. nil means
+    // the episode cover still has to be loaded (see loadNowPlayingArtwork).
+    private func readyNowPlayingArtwork() -> MPMediaItemArtwork? {
+        let source = nowPlayingArtworkSourceKey
+        if let nowPlayingArtwork, source != nil, nowPlayingArtworkSource == source {
+            return nowPlayingArtwork
+        }
+        if let image {
+            let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            nowPlayingArtwork = artwork
+            nowPlayingArtworkSource = source
+            return artwork
+        }
+        return nil
+    }
+
+    private func loadNowPlayingArtwork() {
+        guard let source = nowPlayingArtworkSourceKey,
+              let localUrl = currentPodcast?.fullLocalUrl(.artwork) else { return }
+        // Defer disk I/O off the main actor to avoid UI hitch during play/pause
+        Task.detached { [weak self] in
+            // Ignore artwork failure (e.g. not downloaded yet); keep playing —
+            // setPodcast retries once its download finishes.
+            guard let data = try? Data(contentsOf: localUrl), let img = UIImage(data: data) else { return }
+            await self?.applyLoadedNowPlayingArtwork(img, source: source)
+        }
+    }
+
+    private func applyLoadedNowPlayingArtwork(_ img: UIImage, source: AnyHashable) {
+        // The episode or chapter may have changed while this loaded.
+        guard nowPlayingArtworkSourceKey == source else { return }
+        let artwork = MPMediaItemArtwork(boundsSize: img.size) { _ in img }
+        nowPlayingArtwork = artwork
+        nowPlayingArtworkSource = source
+        var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+        info[MPMediaItemPropertyArtwork] = artwork
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
     
     @MainActor
@@ -551,6 +620,8 @@ import SwiftData
             beginPlayback()
             return
         }
+        guard !isActivatingAudioSession else { return }
+        isActivatingAudioSession = true
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowAirPlay])
         } catch {
@@ -558,6 +629,7 @@ import SwiftData
         }
         activateAudioSession { [weak self] activated in
             guard let self else { return }
+            self.isActivatingAudioSession = false
             self.isAudioSessionActive = activated
             self.beginPlayback()
         }

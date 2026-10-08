@@ -34,6 +34,9 @@ import SwiftData
 
 extension Notification.Name {
     static let episodesChangedNotification = Notification.Name("episodesNotification")
+    // Posted after a tapped "summary ready" notification has loaded its episode
+    // into the player, so MainView can expand the player sheet to show it.
+    static let openPlayerNotification = Notification.Name("openPlayerNotification")
 }
 
 struct GroupedEpisodeList:Identifiable {
@@ -42,12 +45,44 @@ struct GroupedEpisodeList:Identifiable {
     let children:[GroupedEpisodeList]?
 }
 
+// What the background transcription task should do next, as decided by
+// Subscriptions.nextBackgroundTranscriptionAction(). Kept as two distinct cases
+// rather than always calling Transcriber.transcribe() — an episode that's already
+// fully transcribed and just missing a summary would otherwise get its whole
+// transcription redone from scratch to backfill that summary, wasting the task's
+// whole time budget on hours of audio that didn't need reprocessing.
+enum BackgroundTranscriptionAction {
+    case transcribe(Episode)
+    case summarizeOnly(Episode)
+}
+
 @ModelActor actor Subscriptions:NSObject, ObservableObject, Sendable {
     private var downloadCount = 0
     private var tempDuration = 0.0
     private var context: ModelContext { modelExecutor.modelContext }
     private var downloads:Downloads?
-    
+    // Summaries in progress right now, keyed by filename — lets two independent
+    // Transcriber instances (e.g. the interactive load() backfill and the
+    // background task's own throwaway instance) notice they're about to
+    // summarize the same episode at once. The "does a summary already exist on
+    // disk" check Transcriber does itself isn't enough on its own: both can read
+    // "no" before either has written anything.
+    private var summarizingFilenames: Set<String> = []
+
+    /// Atomically claims the right to generate this episode's summary — returns
+    /// false if something else already claimed it, so the caller can skip
+    /// running the (multi-second, on-device) LLM pass and sending a duplicate
+    /// "Summary Ready" notification. Pair with endSummarizing when done.
+    func beginSummarizing(_ filename: String) -> Bool {
+        guard !summarizingFilenames.contains(filename) else { return false }
+        summarizingFilenames.insert(filename)
+        return true
+    }
+
+    func endSummarizing(_ filename: String) {
+        summarizingFilenames.remove(filename)
+    }
+
     /// Saves a Codable array to disk.
     @discardableResult nonisolated func saveArrayToDisk<T: Codable>(array: [T], filePath: String) -> Bool {
         if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -80,11 +115,147 @@ struct GroupedEpisodeList:Identifiable {
         return nil
     }
     
+    /// Saves plain text to disk (e.g. an episode summary) — kept as its own file
+    /// rather than folded into the transcript's JSON, per the transcript/summary
+    /// separation the caller wants.
+    @discardableResult nonisolated func saveTextToDisk(_ text: String, filePath: String) -> Bool {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return false
+        }
+        let fullPath = documents.appendingPathComponent(filePath, isDirectory: false)
+        do {
+            try text.write(to: fullPath, atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            print("Failed to save text to disk: \(error)")
+            return false
+        }
+    }
+
+    /// Loads plain text from disk.
+    nonisolated func loadTextFromDisk(filePath: String) -> String? {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let fullPath = documents.appendingPathComponent(filePath, isDirectory: false)
+        return try? String(contentsOf: fullPath, encoding: .utf8)
+    }
+
     /// Initializes the Subscriptions instance with dependencies.
     func setup(downloads:Downloads) {
         self.downloads = downloads
     }
     
+    /// For the "Continue Playing" auto-advance: the most recent (by publish date)
+    /// downloaded episode that hasn't finished playing yet, excluding whichever
+    /// episode just ended. "Not played" mirrors the app's own "Played" badge
+    /// (PodcastItemView) — within the last minute of the episode counts as done.
+    func mostRecentUnplayedDownloadedEpisode(excluding episode: Episode?) -> Episode? {
+        guard let episodes = try? context.fetch(FetchDescriptor<Episode>(sortBy: [SortDescriptor(\Episode.date, order: .reverse)])) else {
+            return nil
+        }
+        let excludedID = episode?.persistentModelID
+        return episodes.first { candidate in
+            guard candidate.persistentModelID != excludedID else { return false }
+            guard let audioURL = candidate.fullLocalUrl(.audio),
+                  FileManager.default.fileExists(atPath: audioURL.path) else { return false }
+            return candidate.secondsLeft() >= 60
+        }
+    }
+
+    /// Marker file written once a transcription run actually reaches the end of
+    /// the audio. Completion can't be reliably inferred from the transcript alone:
+    /// the last sentence's timestamp vs. the episode's length misreads episodes
+    /// with long trailing music/silence, a missing feed duration, or dynamically
+    /// inserted ads as unfinished — and background transcription would then pick
+    /// the same episode again on every wake, forever.
+    nonisolated func transcriptCompleteMarker(for base: String) -> String {
+        base + "-complete"
+    }
+
+    nonisolated func isTranscriptMarkedComplete(_ base: String) -> Bool {
+        loadTextFromDisk(filePath: transcriptCompleteMarker(for: base)) != nil
+    }
+
+    nonisolated func setTranscriptComplete(_ base: String, _ complete: Bool) {
+        if complete {
+            saveTextToDisk("", filePath: transcriptCompleteMarker(for: base))
+        } else if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? FileManager.default.removeItem(at: documents.appendingPathComponent(transcriptCompleteMarker(for: base), isDirectory: false))
+        }
+    }
+
+    /// Picks the next episode background transcription should work on. A partially
+    /// transcribed episode (one with a checkpointed-but-incomplete .json transcript)
+    /// takes priority over starting a fresh one, so a background wake finishes what
+    /// an earlier wake started instead of scattering partial transcripts around.
+    /// Only considers episodes whose audio is actually downloaded.
+    func nextBackgroundTranscriptionAction() -> BackgroundTranscriptionAction? {
+        guard let episodes = try? context.fetch(FetchDescriptor<Episode>(sortBy: [SortDescriptor(\Episode.date, order: .reverse)])) else {
+            return nil
+        }
+
+        let downloaded = episodes.filter { episode in
+            guard let audioURL = episode.fullLocalUrl(.audio) else { return false }
+            return FileManager.default.fileExists(atPath: audioURL.path)
+        }
+
+        func baseName(for episode: Episode) -> String? {
+            episode.fullLocalUrl(.audio)?.deletingPathExtension().lastPathComponent
+        }
+        func transcript(for episode: Episode) -> [Sentence]? {
+            guard let base = baseName(for: episode) else { return nil }
+            return loadArrayFromDisk(filePath: base + ".json")
+        }
+        func hasSummary(_ episode: Episode) -> Bool {
+            guard let base = baseName(for: episode) else { return false }
+            return loadTextFromDisk(filePath: base + "-summary.txt") != nil
+        }
+
+        // The completion marker is authoritative. Transcripts made before it
+        // existed fall back to Transcriber.checkResumable's threshold, measured
+        // against the downloaded file's real length rather than the feed's
+        // (often missing or ad-skewed) duration. Even if that fallback misjudges
+        // one, the resume run that follows reaches the end and writes the marker,
+        // so an episode can't be re-selected more than once.
+        func isComplete(_ episode: Episode, sentences: [Sentence]) -> Bool {
+            guard let base = baseName(for: episode) else { return false }
+            if isTranscriptMarkedComplete(base) { return true }
+            guard let last = sentences.last,
+                  let url = episode.fullLocalUrl(.audio),
+                  let audioFile = try? AVAudioFile(forReading: url) else { return false }
+            let seconds = Double(audioFile.length) / audioFile.processingFormat.sampleRate
+            return last.timestamp >= seconds - 120
+        }
+
+        // 1. Finish a partially transcribed episode before starting anything else.
+        if let inProgress = downloaded.first(where: { episode in
+            guard let sentences = transcript(for: episode), !sentences.isEmpty else { return false }
+            return !isComplete(episode, sentences: sentences)
+        }) {
+            return .transcribe(inProgress)
+        }
+
+        // 2. A finished transcript with no summary yet — e.g. the on-device model
+        // was still downloading/preparing (SystemLanguageModel.modelNotReady) the
+        // last time this ran. Retrying costs a few seconds of text generation, not
+        // a full re-transcription, so it's worth doing before starting a fresh one.
+        if let needsSummary = downloaded.first(where: { episode in
+            guard let sentences = transcript(for: episode), !sentences.isEmpty,
+                  isComplete(episode, sentences: sentences) else { return false }
+            return !hasSummary(episode)
+        }) {
+            return .summarizeOnly(needsSummary)
+        }
+
+        // 3. Start a fresh episode.
+        if let notStarted = downloaded.first(where: { transcript(for: $0) == nil }) {
+            return .transcribe(notStarted)
+        }
+
+        return nil
+    }
+
     /// Loads episodes grouped by directory.
     func loadFeed() -> [GroupedEpisodeList] {
         let descriptor = FetchDescriptor<Episode>(sortBy: [SortDescriptor(\Episode.date, order: .reverse)])

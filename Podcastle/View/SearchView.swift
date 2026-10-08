@@ -185,18 +185,42 @@ struct SearchView: View {
     @State var changes = 0
     @State var showSuccessAlert = false
     @State private var isLoading = false
+    @State private var isSearchingLive = false
+    // Debounced live search: cancelling the previous attempt when a newer
+    // keystroke supersedes it genuinely cuts the in-flight network request short
+    // (Downloads.download checks Task cancellation), not just its stale response.
+    @State private var liveSearchTask: Task<Void, Never>?
+    // Guards against a slow, superseded search's response landing after a newer
+    // one already updated the results — cancellation alone isn't quite enough to
+    // rely on, since it's cooperative and checked only periodically.
+    @State private var searchGeneration = 0
     let directory = PodcastDirectorySearch()
     @Environment(\.dismissSearch) var dismissSearch
     @Environment(\.dismiss) var dismiss
     @Environment(\.isSearching) var isSearching
     @EnvironmentObject var subscriptions:Subscriptions
     @EnvironmentObject var downloads:Downloads
-    
+
+    // Short enough to feel live, long enough that a normal typing cadence only
+    // fires one request per pause rather than one per keystroke.
+    private let liveSearchDebounce: Duration = .milliseconds(350)
+    // Below this, a query is too broad to be worth a round trip on every pause —
+    // still saves network for the first character or two, same spirit as only
+    // searching on submit before, just far more responsive past that point.
+    private let liveSearchMinimumLength = 2
+
     var body: some View {
         NavigationStack {
             List {
                 if top {
                     Section("Popular Podcasts") {
+                    }
+                }
+                if isSearchingLive {
+                    HStack {
+                        Spacer()
+                        ProgressView().controlSize(.small)
+                        Spacer()
                     }
                 }
                 ForEach(results, id:\.its_id) { item in
@@ -208,29 +232,15 @@ struct SearchView: View {
             .navigationTitle("Add Podcast")
             .navigationBarTitleDisplayMode(.inline)
             .searchable(text: $searchText, prompt:"Search for Podcasts or type a URL")
+            .onChange(of: searchText) { _, newValue in
+                scheduleLiveSearch(for: newValue)
+            }
             .onSubmit(of: .search) {
-                if startsWithValidURL(string:searchText) {
-                    isLoading = true
-                    Task {
-                        defer { isLoading = false }
-                        if let podcasts = await directory.fetchPodcasts(urlString: searchText, downloads: downloads) { //{ (podcasts, error) in
-                            if let first = podcasts.first {
-                                await subscriptions.addPodcast(first)
-                                changes = changes + 1
-                                showSuccessAlert = true
-                            }
-                        }
-                    }
-                } else {
-                    isLoading = true
-                    Task {
-                        defer { isLoading = false }
-                        if let podcasts = await directory.fetchPodcasts(searchTerm: searchText, downloads: downloads) { results = podcasts
-                        }
-                        dismissSearch()
-                        top = false
-                    }
-                }
+                // An explicit Return/submit always runs right away, regardless of
+                // length or any pending debounce — e.g. pasting a feed URL, or
+                // just not wanting to wait out the pause.
+                liveSearchTask?.cancel()
+                performSearch(searchText, dismissAfterward: true, showBlockingOverlay: true)
             }
             .overlay {
                 if isLoading {
@@ -267,8 +277,77 @@ struct SearchView: View {
             // Check if the string starts with a valid URL scheme and host
             return string.hasPrefix("\(scheme)://\(host)")
         }
-        
+
         return false
+    }
+
+    // Cancels whatever the previous keystroke scheduled, then — once typing has
+    // paused and there's enough text to be worth it — runs the search for real.
+    // No one types a feed URL character by character expecting live results from
+    // it, so that case is still left to an explicit submit only.
+    private func scheduleLiveSearch(for text: String) {
+        liveSearchTask?.cancel()
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            // Cleared back to nothing — snap straight back to the popular-podcasts
+            // view (same fetch as onAppear) rather than waiting out a pause, and
+            // rather than just blanking the list.
+            searchGeneration += 1
+            let generation = searchGeneration
+            top = true
+            Task {
+                if let podcasts = await directory.fetchPodcasts(searchTerm: "", downloads: downloads),
+                   generation == searchGeneration {
+                    results = podcasts
+                }
+            }
+            return
+        }
+        guard trimmed.count >= liveSearchMinimumLength, !startsWithValidURL(string: trimmed) else { return }
+
+        liveSearchTask = Task {
+            try? await Task.sleep(for: liveSearchDebounce)
+            guard !Task.isCancelled else { return }
+            performSearch(trimmed, dismissAfterward: false, showBlockingOverlay: false)
+        }
+    }
+
+    // Shared by both the debounced live search and an explicit Return/submit —
+    // only the loading indicator and whether the keyboard dismisses afterward
+    // differ between the two.
+    private func performSearch(_ text: String, dismissAfterward: Bool, showBlockingOverlay: Bool) {
+        searchGeneration += 1
+        let generation = searchGeneration
+
+        if startsWithValidURL(string: text) {
+            isLoading = true
+            Task {
+                defer { isLoading = false }
+                if let podcasts = await directory.fetchPodcasts(urlString: text, downloads: downloads),
+                   generation == searchGeneration,
+                   let first = podcasts.first {
+                    await subscriptions.addPodcast(first)
+                    changes = changes + 1
+                    showSuccessAlert = true
+                }
+            }
+        } else {
+            if showBlockingOverlay { isLoading = true } else { isSearchingLive = true }
+            Task {
+                defer {
+                    if showBlockingOverlay { isLoading = false } else { isSearchingLive = false }
+                }
+                if let podcasts = await directory.fetchPodcasts(searchTerm: text, downloads: downloads),
+                   generation == searchGeneration {
+                    results = podcasts
+                    top = false
+                }
+                if dismissAfterward {
+                    dismissSearch()
+                }
+            }
+        }
     }
 }
 

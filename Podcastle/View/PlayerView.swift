@@ -52,7 +52,7 @@ struct PlayerControlsView: View {
     let backgroundColor: Color
     @EnvironmentObject var player:PodcastPlayer
     @EnvironmentObject var progress:Progress
-    
+
     var body: some View {
         ZStack {
             HStack {
@@ -110,10 +110,9 @@ struct PlayerControlsView: View {
     
     func timeLeft() -> Double {
         let d = player.duration
-        
+
         return d != 0.0 ? (progress.value / d) * 100.0 : 0.0
     }
-    
 }
 
 struct PlayerFileView: View {
@@ -233,9 +232,11 @@ struct PlayerFullHeaderView: View {
 }
 
 struct PlayerChaptersView: View {
+    let backgroundColor: Color
     @EnvironmentObject var file:PodcastFile
     @EnvironmentObject var player:PodcastPlayer
-    
+    @EnvironmentObject var progress:Progress
+
     var body: some View {
         VStack {
             if file.currentChapter != nil {
@@ -249,7 +250,10 @@ struct PlayerChaptersView: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(.white)
                                 .foregroundColor(.black)
-                            
+                            // How far through this chapter we are — only meaningful (and
+                            // only shown) for the chapter that's currently playing.
+                            CircularProgressView(progress: chapterProgress(chapter), backgroundColor: backgroundColor)
+                                .frame(width: 24, height: 24)
                         } else {
                             Button("\(s)", action: {
                                 player.absoluteSeek(Double(chapter.startTime) / 1000.0)
@@ -267,6 +271,16 @@ struct PlayerChaptersView: View {
                 }
             }
         }
+    }
+
+    // Elapsed fraction (0–100) of this chapter based on current playback position.
+    func chapterProgress(_ chapter: ID3V2Frame) -> Double {
+        let start = Double(chapter.startTime) / 1000.0
+        let end = Double(chapter.endTime) / 1000.0
+        let length = end - start
+        guard length > 0 else { return 0 }
+        let elapsed = progress.value - start
+        return min(100, max(0, (elapsed / length) * 100.0))
     }
 }
 
@@ -293,12 +307,25 @@ struct PlayerView: View {
         GeometryReader { proxy in
             ScrollView {
                 ZStack(alignment: .top) {
+                    // These used to be an if/else on the same condition, which
+                    // meant that whenever forceRedraw forced the full view to
+                    // mount while still genuinely collapsed (proxy.size.height
+                    // == 144) — exactly what happens when the current podcast
+                    // changes programmatically, e.g. Continue Playing advancing
+                    // to the next episode while the sheet is collapsed — the
+                    // mini view was excluded by the else branch entirely. The
+                    // full view's own opacity is 0 at that height (by design,
+                    // it's only mounting early to refresh its state before the
+                    // user ever expands it), so the result was nothing visible
+                    // at all. Making them independent ifs lets the mini view
+                    // keep showing on its own actual-height condition the whole
+                    // time, regardless of what forceRedraw is doing.
                     if proxy.size.height > 144 || forceRedraw {
                         VStack(alignment: .center, spacing: 20.0) {
                             PlayerFullHeaderView()
                             PlayerControlsView(backgroundColor:backgroundColor)
                             PlayerProgressView()
-                            PlayerChaptersView()
+                            PlayerChaptersView(backgroundColor:backgroundColor)
                             Text(podcastNotes ?? "")
                                 .font(.system(size: 16))
                                 .foregroundColor(.black)
@@ -314,8 +341,19 @@ struct PlayerView: View {
                             PlayerFileView()
                             Spacer(minLength: 20)
                         }.opacity(1.0 - fader(proxy.size.height))
+                        // forceRedraw mounts this early (while genuinely still
+                        // collapsed) purely so its children's own .onAppear/.task
+                        // side effects run ahead of time — not to actually occupy
+                        // space behind the mini view. Without this, its real
+                        // intrinsic height (header, chapters, transcript, file
+                        // info — all tall) was inflating the ScrollView's content
+                        // size while collapsed, making the "mini" player
+                        // scrollable/draggable behind the scenes even though
+                        // nothing from it was visible.
+                        .frame(height: proxy.size.height <= 144 ? 0 : nil, alignment: .top)
+                        .clipped()
                     }
-                    else {
+                    if proxy.size.height <= 144 {
                         VStack(alignment:.center) {
                             HStack {
                                 Text("\(player.title)").font(.body).padding().lineLimit(1).foregroundColor(.white)

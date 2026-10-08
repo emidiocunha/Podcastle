@@ -198,41 +198,52 @@ struct AsyncImageView: View {
     var width: CGFloat
     
     @State private var loadedImage: Image? = nil
-    
+    @State private var loadedURL: String? = nil
+
     var body: some View {
-        if !url.isEmpty {
-            if let img = loadedImage {
-                formatImage(img)
+        Group {
+            if !url.isEmpty {
+                // Only trust loadedImage if it was actually loaded for this
+                // url — a persistent AsyncImageView (e.g. the player's artwork,
+                // which stays mounted while player.currentPodcast changes
+                // underneath it) would otherwise keep showing the previous
+                // podcast's artwork forever: a plain `.task` with no `id` only
+                // ever runs once per view identity, not once per url.
+                if let img = loadedImage, loadedURL == url {
+                    formatImage(img)
+                } else {
+                    ProgressView()
+                        .frame(width: width, height: width * 0.75)
+                }
+            }
+            else {
+                EmptyView()
+            }
+        }
+        .task(id: url) {
+            guard !url.isEmpty else { return }
+            // Load image from cache, disk, or remote
+            if let img = await imageCache.image(for: url) {
+                loadedImage = img
+                loadedURL = url
             } else {
-                ProgressView()
-                .frame(width: width, height: width * 0.75)
-                .task {
-                    // Load image from cache, disk, or remote
-                    if let img = await imageCache.image(for: url) {
-                        loadedImage = img
-                    } else {
-                        // Attempt to fetch from the network
-                        if let remoteURL = URL(string: url) {
-                            do {
-                                let (data, _) = try await URLSession.shared.data(from: remoteURL)
-                                if let uiImage = UIImage(data: data), !uiImage.isAllWhite() {
-                                    let image = Image(uiImage: uiImage)
-                                    self.imageCache[url] = image
-                                    await MainActor.run {
-                                        loadedImage = image
-                                    }
-                                }
-                            } catch {
-                                print("Error loading image from network: ", error)
+                // Attempt to fetch from the network
+                if let remoteURL = URL(string: url) {
+                    do {
+                        let (data, _) = try await URLSession.shared.data(from: remoteURL)
+                        if let uiImage = UIImage(data: data), !uiImage.isAllWhite() {
+                            let image = Image(uiImage: uiImage)
+                            self.imageCache[url] = image
+                            await MainActor.run {
+                                loadedImage = image
+                                loadedURL = url
                             }
                         }
-
+                    } catch {
+                        print("Error loading image from network: ", error)
                     }
                 }
             }
-        }
-        else {
-            EmptyView()
         }
     }
     

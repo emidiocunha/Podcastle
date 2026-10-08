@@ -329,6 +329,19 @@ struct MainView: View {
     @State private var presentationDetent = PresentationDetent.height(144.0)
     @State var themeColor = Color.clear
     @State var title = "Podcastle"
+    // Global on/off for the BGProcessingTask that transcribes downloaded episodes
+    // in the background (see PodcastleApp's scheduleTranscriptionRefresh). The
+    // shared key/default are registered at launch so AppDelegate reads the same
+    // value this switch controls. Off by default — the one-time onboarding prompt
+    // below is what turns it on.
+    @AppStorage(kBackgroundTranscriptionEnabledKey) var backgroundTranscriptionEnabled = false
+    @AppStorage(kBackgroundTranscriptionOnboardingShownKey) private var backgroundTranscriptionOnboardingShown = false
+    @State private var showBackgroundTranscriptionOnboarding = false
+    // Auto-advance to the most recent unplayed downloaded episode when the
+    // current one finishes (see PodcastPlayer's end-of-playback handler). On by
+    // default — unlike background transcription, this doesn't cost battery, so
+    // there's no onboarding prompt gating it.
+    @AppStorage(kContinuePlayingEnabledKey) var continuePlayingEnabled = true
   
     var body: some View {
         NavigationStack {
@@ -374,6 +387,12 @@ struct MainView: View {
                                 }) {
                                     Label("Clear Cache", systemImage: "trash")
                                 }
+                                Toggle(isOn: $backgroundTranscriptionEnabled) {
+                                    Label("Background Transcription", systemImage: "waveform.badge.mic")
+                                }
+                                Toggle(isOn: $continuePlayingEnabled) {
+                                    Label("Continue Playing", systemImage: "forward.end.fill")
+                                }
                             } label: {
                                 Label("More", systemImage: "ellipsis")
                             }
@@ -413,6 +432,34 @@ struct MainView: View {
                                     },
                                     secondaryButton: .cancel())
                             }
+                            // Alongside showingClearCacheAlert above, not on the
+                            // NavigationStack that presents this sheet — an alert
+                            // and this sheet both trying to present from the same
+                            // underlying view controller is a real conflict (not a
+                            // timing one: a delay didn't fix it) that left the
+                            // sheet simply never appearing. Attached here, inside
+                            // the sheet's own content, it presents from the
+                            // sheet's own hosting controller instead, same as
+                            // showingClearCacheAlert already does safely.
+                            .task {
+                                // Asked once, ever, regardless of the answer — the
+                                // More menu switch covers changing your mind
+                                // either way after this.
+                                if !backgroundTranscriptionOnboardingShown {
+                                    showBackgroundTranscriptionOnboarding = true
+                                }
+                            }
+                            .alert("Background Transcription", isPresented: $showBackgroundTranscriptionOnboarding) {
+                                Button("Enable") {
+                                    backgroundTranscriptionEnabled = true
+                                    backgroundTranscriptionOnboardingShown = true
+                                }
+                                Button("Not Now", role: .cancel) {
+                                    backgroundTranscriptionOnboardingShown = true
+                                }
+                            } message: {
+                                Text("Podcastle can now transcribe your podcasts in the background, and also provide a summary of the contents. Would you like to enable it?\n\nCaution: this will consume more battery, and you can always disable it later in the More menu.")
+                            }
                     }
             }
         }
@@ -435,6 +482,21 @@ struct MainView: View {
             @unknown default:
                 break
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openPlayerNotification)) { _ in
+            // AppDelegate already loaded the tapped notification's episode into
+            // `player` by the time this fires — just bring the sheet up so the
+            // user actually sees it instead of landing on the collapsed mini player.
+            showingPlayer = true
+            presentationDetent = .large
+        }
+        .onChange(of: backgroundTranscriptionEnabled) { _, enabled in
+            // Submits a request as soon as it's turned on, rather than waiting for
+            // the next launch/backgrounding to do it — otherwise an app that's
+            // killed instead of backgrounded would never have one queued.
+            // Turning it off cancels any already-queued request (the scheduler
+            // does that itself when it sees the setting is off).
+            AppDelegate.scheduleTranscriptionRefresh()
         }
     }
 }
