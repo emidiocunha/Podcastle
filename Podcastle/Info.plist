@@ -8,15 +8,15 @@
 		<string>com.mobyte.voicefeed.backgroundDownload</string>
 		<string>com.mobyte.voicefeed.transcribe</string>
 	</array>
-	<key>NSUserActivityTypes</key>
-	<array>
-		<string>com.mobytestudio.VoiceFeed.episode</string>
-	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>com.mobytestudio.VoiceFeed.episode</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
