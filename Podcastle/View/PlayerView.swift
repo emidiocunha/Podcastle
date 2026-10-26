@@ -245,7 +245,7 @@ struct PlayerChaptersView: View {
                     HStack {
                         let s = chapter.prettyPrintChapterTitle(time:true)
                         if s == current {
-                            Button("\(s)", action: { player.absoluteSeek(Double(chapter.startTime) / 1000.0) })
+                            Button("\(s)", action: { player.playChapter(chapter) })
                                 .buttonBorderShape(.capsule)
                                 .buttonStyle(.borderedProminent)
                                 .tint(.white)
@@ -256,7 +256,7 @@ struct PlayerChaptersView: View {
                                 .frame(width: 24, height: 24)
                         } else {
                             Button("\(s)", action: {
-                                player.absoluteSeek(Double(chapter.startTime) / 1000.0)
+                                player.playChapter(chapter)
                             }).buttonStyle(.bordered)
                                 .buttonBorderShape(.capsule)
                         }
@@ -307,19 +307,8 @@ struct PlayerView: View {
         GeometryReader { proxy in
             ScrollView {
                 ZStack(alignment: .top) {
-                    // These used to be an if/else on the same condition, which
-                    // meant that whenever forceRedraw forced the full view to
-                    // mount while still genuinely collapsed (proxy.size.height
-                    // == 144) — exactly what happens when the current podcast
-                    // changes programmatically, e.g. Continue Playing advancing
-                    // to the next episode while the sheet is collapsed — the
-                    // mini view was excluded by the else branch entirely. The
-                    // full view's own opacity is 0 at that height (by design,
-                    // it's only mounting early to refresh its state before the
-                    // user ever expands it), so the result was nothing visible
-                    // at all. Making them independent ifs lets the mini view
-                    // keep showing on its own actual-height condition the whole
-                    // time, regardless of what forceRedraw is doing.
+                    // Separate ifs, not if/else: forceRedraw can mount the full view while collapsed
+                    // (where it's invisible), and the mini view must still show.
                     if proxy.size.height > 144 || forceRedraw {
                         VStack(alignment: .center, spacing: 20.0) {
                             PlayerFullHeaderView()
@@ -341,15 +330,7 @@ struct PlayerView: View {
                             PlayerFileView()
                             Spacer(minLength: 20)
                         }.opacity(1.0 - fader(proxy.size.height))
-                        // forceRedraw mounts this early (while genuinely still
-                        // collapsed) purely so its children's own .onAppear/.task
-                        // side effects run ahead of time — not to actually occupy
-                        // space behind the mini view. Without this, its real
-                        // intrinsic height (header, chapters, transcript, file
-                        // info — all tall) was inflating the ScrollView's content
-                        // size while collapsed, making the "mini" player
-                        // scrollable/draggable behind the scenes even though
-                        // nothing from it was visible.
+                        // Mounted early only for its side effects; keep it from sizing the ScrollView while collapsed.
                         .frame(height: proxy.size.height <= 144 ? 0 : nil, alignment: .top)
                         .clipped()
                     }
@@ -366,7 +347,9 @@ struct PlayerView: View {
                     }
                 }
             }
+            .scrollBounceBehavior(.basedOnSize)
             .environmentObject(player.playbackProgress)
+            .siriNowPlaying(player.currentPodcast)
             .foregroundColor(.white)
             .frame(maxWidth:.infinity)
             .animationsDisabled()

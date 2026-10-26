@@ -30,13 +30,8 @@
 
 import Foundation
 
-//
-// Define a struct to represent a podcast directory entry from Apple iTunes
-// Assumptions:
-//
-// collectionId in the search api is the same as Id in the marketing api, and
-// they both are a unique identifier
-//
+// A podcast directory entry from the iTunes API. Assumes the search API's
+// collectionId matches the marketing API's id, and both are unique.
 
 struct PodcastDirectoryEntry:Identifiable,Codable {
     let id:UInt64

@@ -383,9 +383,7 @@ struct ID3V2File {
                 return 0
             }()
 
-            // Create a CHAP frame with a TIT2 subframe for the title
-            //var chap = ID3V2Frame(from: Data(), offset: 0) // we will construct manually below
-            // Manual init fallback: construct by setting fields directly
+            // CHAP frame with a TIT2 subframe for the title.
             var chap = ID3V2Frame(frameID: "CHAP", startTime: startMs, endTime: endMs, title: "", elementID: UUID().uuidString, subFrames: [], url: nil)
 
             // Create a minimal TIT2 subframe carrying the chapter title

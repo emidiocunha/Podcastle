@@ -29,52 +29,88 @@
 
 import SwiftUI
 
-// This view is shown when the app has no subscribed podcasts
+// Shown when there are no subscribed podcasts. Refers to the toolbar buttons by icon,
+// since their position varies (e.g. on iPhone Duo).
 struct OnboardView: View {
+    var addPodcast: () -> Void
+
     var body: some View {
         ScrollView {
-            VStack {
-                HStack {
-                    Image("left_arrow")
+            VStack(spacing: 24) {
+                VStack(spacing: 8) {
+                    // Rebuilt from Podcastle.icon's parts, which can't be loaded as an Image.
+                    Image("app_icon_foreground")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 64)
-                        .padding(.leading, 8)
-                    Spacer()
-                    Image("left_arrow")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .scaleEffect(x: -1, y: 1)
-                        .frame(width: 64)
-                        .padding(.trailing, 8)
+                        .background(Color(red: 1.0, green: 0.231, blue: 0.188))
+                        .frame(width: 96, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+                        .accessibilityHidden(true)
+                    Text("Welcome to Podcastle")
+                        .font(.title2.bold())
                 }
-                HStack {
-                    Spacer()
-                    Text("Start here to search and add a Podcast to this list, the last episode of the podcast will download automatically.")
-                        .font(.footnote)
-                        .padding()
-                        .background(RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.yellow))
-                    Spacer()
-                    Text("For more options in the app, such as sending us feedback, looking at the app Log or clearing the local cache.")
-                        .font(.footnote)
-                        .padding()
-                    Spacer()
+                .padding(.top, 32)
+
+                Button(action: addPodcast) {
+                    Label("Add a Podcast", systemImage: "plus")
+                        .frame(maxWidth: 320)
                 }
-                Spacer()
-                VStack {
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    OnboardTip(systemImage: "plus",
+                               text: "Search and add a Podcast to this list, the last episode of the podcast will download automatically.")
+                    OnboardTip(systemImage: "ellipsis",
+                               text: "For more options in the app, such as sending us feedback, looking at the app Log or clearing the local cache.")
+                }
+                .frame(maxWidth: 480)
+
+                VStack(spacing: 8) {
                     Image("sample_row")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                    Text("Once you have an episode list, they will be grouped by Podcast. You tap once to select it as the current episode, and you can delete them individually by swipping left.").font(.footnote).padding()
-                    Spacer()
-                    Text("Podcastle is now completely free, and also an Open Source project that you can contribute to!").font(.footnote).padding()
-                    Spacer()
-                    Text("See more at http://github.com/emidiocunha/podcastle").font(.footnote).padding()
-                    Spacer()
-                }.padding(10)
-                Spacer(minLength: 128)
+                        .frame(maxWidth: 480)
+                    Text("Once you have an episode list, they will be grouped by Podcast. You tap once to select it as the current episode, and you can delete them individually by swipping left.")
+                }
+
+                VStack(spacing: 8) {
+                    Text("Podcastle is now completely free, and also an Open Source project that you can contribute to!")
+                    Link("github.com/emidiocunha/podcastle", destination: URL(string: "https://github.com/emidiocunha/podcastle")!)
+                }
+                .multilineTextAlignment(.center)
             }
+            .font(.footnote)
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 128)
         }
     }
+}
+
+// One toolbar button, shown by its icon, and what it does.
+private struct OnboardTip: View {
+    var systemImage: String
+    var text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color(.secondarySystemFill)))
+            Text(text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+#Preview {
+    OnboardView(addPodcast: {})
+}
+
+#Preview("Dark") {
+    OnboardView(addPodcast: {})
+        .preferredColorScheme(.dark)
 }

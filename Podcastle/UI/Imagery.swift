@@ -203,12 +203,8 @@ struct AsyncImageView: View {
     var body: some View {
         Group {
             if !url.isEmpty {
-                // Only trust loadedImage if it was actually loaded for this
-                // url — a persistent AsyncImageView (e.g. the player's artwork,
-                // which stays mounted while player.currentPodcast changes
-                // underneath it) would otherwise keep showing the previous
-                // podcast's artwork forever: a plain `.task` with no `id` only
-                // ever runs once per view identity, not once per url.
+                // Only use loadedImage if it matches the current url; the view can stay mounted
+                // while its url changes.
                 if let img = loadedImage, loadedURL == url {
                     formatImage(img)
                 } else {

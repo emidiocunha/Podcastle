@@ -78,10 +78,7 @@ struct TranscriptView: View {
             }
             Spacer()
         }
-        // Lazy so off-screen sentence rows skip layout entirely — this view sits inside
-        // PlayerView's ScrollView, and the transcript can grow to hundreds of rows while
-        // actively transcribing. A plain VStack here forced a full layout pass of every
-        // sentence on every single append, which is what made live updates feel sluggish.
+        // Lazy, so off-screen rows skip layout as the transcript grows.
         LazyVStack(alignment: .leading, spacing: 8.0) {
             if !transcriber.working && !transcriber.summary.isEmpty {
                 VStack(alignment: .leading, spacing: 6.0) {
@@ -89,10 +86,7 @@ struct TranscriptView: View {
                         Text("Summary").font(.headline)
                         Spacer()
                         Button(action: {
-                            // Starting playback and speech at once would talk over
-                            // the episode itself — pause it first. Stopping speech
-                            // doesn't touch playback, so the user stays in control
-                            // of resuming it themselves.
+                            // Pause the episode first so speech doesn't talk over it.
                             if !summarySpeaker.isSpeaking && player.isPlaying {
                                 player.pause()
                             }

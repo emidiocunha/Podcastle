@@ -36,9 +36,7 @@ import SwiftData
     var artist:     String = ""
     var feed:       String = ""
     var artwork:    String = ""
-    // Set once a feed fetch has completed without yielding any episodes, so the
-    // pending-podcast placeholder can stop spinning and show a failure state
-    // instead of appearing stuck forever.
+    // Set when a fetch yields no episodes, so the pending row shows a failure instead of spinning.
     var fetchFailed: Bool = false
 
     public init() {

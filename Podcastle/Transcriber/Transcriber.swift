@@ -58,46 +58,25 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
     private var currentTask:SFSpeechRecognitionTask?
     private let audioEngine = AVAudioEngine()
     private var currentTimeOffset:TimeInterval = 0
-    // Set from the episode's title/description whenever load() runs, so it's
-    // always correct for whatever's currently loaded — including a transcript or
-    // summary produced earlier by the background task, which load() itself never
-    // ran detection for. Exposed read-only so the summary's "Play" button can pick
-    // a matching voice.
+    // Detected from the episode's title/description in load(); also picks the summary voice.
     private(set) var language = "en_US"
     private var handler:(([(String, TimeInterval)]?, Error?) -> Void)? = nil
     private var resumePosition:Int64 = 0
     private var subscriptions:Subscriptions?
-    // Set by load(_:title:episodeAudioURL:) — used only to identify the episode in
-    // the "summary ready" notification (episodeAudioURL is Episode.audio, the
-    // stable ID Subscriptions.findEpisode(_:) looks episodes up by).
+    // Identifies the episode in the "summary ready" notification.
     private var episodeTitle:String = ""
     private var episodeAudioURL:String = ""
-    // Owns the in-flight transcription so `cancel()` can actually stop it — the
-    // SpeechAnalyzer path polls this via `Task.isCancelled` instead of racing on
-    // the @Published `working` flag from whatever thread called cancel().
+    // Lets cancel() actually stop the in-flight transcription.
     private var currentTranscriptionTask:Task<Void, Never>?
-    // Filename this run checkpoints `allSentences` to, and when we last did so.
-    // Previously the transcript was only written to disk once, at the very end —
-    // an app suspension, crash, or background-task expiration mid-run lost
-    // everything transcribed so far.
+    // Where and when this run last checkpointed `allSentences` to disk.
     private var checkpointFilename:String?
     private var lastCheckpointAt:Date = .distantPast
     private let checkpointInterval:TimeInterval = 5.0
-    // Set at the tail of recognizeSpeech/transcribeWithSpeechAnalyzer to whether
-    // *this run* actually made it through the whole file, as opposed to being cut
-    // short by cancellation or an error. transcribeAudioFileWithTimestamps uses
-    // this — not resumePosition — to decide whether to summarize (see checkResumable
-    // for why resumePosition alone is the wrong signal for that).
+    // Whether this run transcribed the whole file (not cancelled or failed). Decides
+    // whether to summarize.
     private var lastRunReachedEndOfAudio = false
-    // Bumped every time transcribe() starts a new run. recognizeSpeechBuffer's
-    // completion handler captures the generation current when it starts and
-    // checks it again before mutating allSentences/sentences — cancelling
-    // currentTask/currentTranscriptionTask doesn't guarantee an already in-flight
-    // SFSpeechRecognitionTask's completion handler won't still fire afterward,
-    // and if it did and nothing else were checked, it would append stale
-    // sentences and a stale checkpoint into whatever a newer run (a quick
-    // Stop-then-Start, or background transcription racing a foreground one) had
-    // already reset.
+    // Bumped for every new run. Recognition callbacks from an older run can still fire
+    // after cancellation, so they check this before touching shared state.
     private var transcriptionGeneration = 0
     
     func setup(subscriptions:Subscriptions) {
@@ -135,15 +114,12 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             return
         }
 
-        // Capture snapshot to avoid concurrent mutation concerns
         let source = allSentences
 
-        // Do the potentially expensive filtering off the main thread
         DispatchQueue.global(qos: .userInitiated).async {
             let lower = query.lowercased()
             let result = source.filter { $0.sentence.lowercased().contains(lower) }
 
-            // Publish results back on the main thread
             DispatchQueue.main.async {
                 self.sentences = result
             }
@@ -159,9 +135,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         return text
     }
 
-    // Flushes the transcript built so far to disk, throttled so a long run doesn't
-    // rewrite the whole (growing) array on every recognition result. Called from
-    // both recognition paths after each chunk of new sentences lands.
+    // Saves the transcript so far to disk, throttled so long runs don't rewrite it constantly.
     private func saveCheckpoint() {
         guard let checkpointFilename else { return }
         let now = Date()
@@ -170,9 +144,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         subscriptions?.saveArrayToDisk(array: allSentences, filePath: checkpointFilename)
     }
 
-    // Best-effort language detection from an episode's title/description, shared by
-    // the interactive transcribe flow (TranscriberView) and background transcription
-    // so both pick the same locale.
+    // Shared by TranscriberView and background transcription so both pick the same locale.
     static func detectLanguage(title: String, desc: String) -> String {
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(title + "\n\n" + desc)
@@ -183,21 +155,13 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         base + "-summary.txt"
     }
 
-    // `language` is a bare or region-qualified code like "pt" or "en_US" — turn it
-    // into a name the model can follow unambiguously regardless of what language
-    // the transcript text itself happens to be in.
     private func languageName(for code: String) -> String {
         let bare = code.split(separator: "_").first.map(String.init) ?? code
         return Locale(identifier: "en_US").localizedString(forLanguageCode: bare) ?? bare
     }
 
-    // Retries the summary for a transcript that's already complete, without
-    // touching the transcript itself — used by background transcription to retry
-    // a summary that couldn't be generated last time (e.g. SystemLanguageModel was
-    // still downloading/preparing) without redoing potentially hours of already-
-    // finished transcription. Sets episode identity directly rather than going
-    // through load(), so it doesn't also trigger load()'s own backfill Task and
-    // end up running the summarization twice.
+    // Retries the summary for an already complete transcript without redoing it.
+    // Bypasses load() so its own summary backfill doesn't run as well.
     func summarizeExistingTranscript(_ url: URL, title: String, desc: String, episodeAudioURL: String) async {
         guard let fn = url.deletingPathExtension().lastPathComponent as String? else { return }
         let loaded: [Sentence] = subscriptions?.loadArrayFromDisk(filePath: fn + ".json") ?? []
@@ -205,19 +169,12 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         audioURL = url
         episodeTitle = title
         self.episodeAudioURL = episodeAudioURL
-        // This path bypasses load() (deliberately, see above), which is where
-        // language detection normally happens — without this, the background
-        // task's fresh Transcriber() instance would default to "en_US" and both
-        // the summarization language and the TTS voice match would be wrong for
-        // a non-English episode.
+        // load() isn't called on this path, so detect the language here too.
         language = Transcriber.detectLanguage(title: title, desc: desc)
         await summarizeIfNeeded(fn: fn, sentences: loaded)
     }
 
-    // Generates the whole-episode summary once, after a transcript finishes
-    // completely — never from a run that stopped partway through. Skips work if a
-    // summary is already on disk for this episode (deleteTranscription clears it,
-    // which is what forces a fresh one next time).
+    // Summarizes once a transcript is complete. Skipped if a summary is already on disk.
     private func summarizeIfNeeded(fn: String, sentences: [Sentence]) async {
         let filename = summaryFilename(for: fn)
         guard subscriptions?.loadTextFromDisk(filePath: filename) == nil else { return }
@@ -225,21 +182,11 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             print("Skipping summary: on-device summarization needs iOS 26 or later.")
             return
         }
-        // Claims this episode atomically — the disk check above alone isn't
-        // enough: two independent Transcriber instances (e.g. load()'s own
-        // backfill here vs. the background task's throwaway instance, both
-        // deciding at once that episode X needs a summary) could otherwise both
-        // pass it before either has written anything, running the on-device LLM
-        // twice and sending two "Summary Ready" notifications for the same
-        // episode.
+        // Claims the episode so two Transcriber instances can't summarize it at once.
         guard let subscriptions, await subscriptions.beginSummarizing(filename) else { return }
         defer { Task { await subscriptions.endSummarizing(filename) } }
 
-        // Captured now, not read lazily off `self` later — a later load()/reset()
-        // switching this (shared, UI-facing) instance to a different episode
-        // while this runs (easily multi-second) shouldn't end up writing that
-        // *other* episode's live `summary`/status, or firing a notification
-        // titled for it instead of the episode this summary is actually about.
+        // Captured up front: load()/reset() may switch this instance to another episode meanwhile.
         let capturedAudioURL = audioURL
         let capturedEpisodeTitle = episodeTitle
         let capturedEpisodeAudioURL = episodeAudioURL
@@ -248,6 +195,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         await setStatus("Summarizing")
         if let generated = await summarizeTranscript(sentences) {
             subscriptions.saveTextToDisk(generated, filePath: filename)
+            await MainActor.run { updateSiriIndex() }
             if stillCurrent() {
                 await MainActor.run { self.summary = generated }
                 await notifySummaryReady(identifier: fn, summaryText: generated, episodeTitle: capturedEpisodeTitle, episodeAudioURL: capturedEpisodeAudioURL)
@@ -255,12 +203,8 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         } else {
             print("Summary generation produced no result for \(fn) — check Apple Intelligence availability in Settings.")
         }
-        // transcribeAudioFileWithTimestamps also clears status after calling this,
-        // but load()'s backfill calls this standalone with no such wrapper — without
-        // clearing it here too, "Summarizing" (and the working=true it implies)
-        // would never go away for that path. Skipped if a newer episode has since
-        // taken over this instance, so this doesn't clear *that* episode's own
-        // legitimately-in-progress status.
+        // load()'s backfill has no wrapper that clears status, so clear it here, unless
+        // another episode has taken over this instance.
         if stillCurrent() {
             await setStatus("")
         }
@@ -297,11 +241,8 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         return cut.trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    // Summarizes with Apple's on-device model (FoundationModels) — in keeping with
-    // this app's privacy stance, no transcript text ever leaves the device. A full
-    // podcast transcript can easily exceed the on-device model's context window, so
-    // a single-pass failure falls back to summarizing in chunks and then summarizing
-    // those summaries.
+    // Summarizes on-device with FoundationModels. Long transcripts that overflow the
+    // context window are summarized in chunks, then the chunk summaries are combined.
     @available(iOS 26.0, *)
     private func summarizeTranscript(_ sentences: [Sentence]) async -> String? {
         guard SystemLanguageModel.default.availability == .available else {
@@ -311,9 +252,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         let fullText = sentences.map(\.sentence).joined(separator: " ")
         guard !fullText.isEmpty else { return nil }
 
-        // Named explicitly rather than trusting the model to mirror the transcript's
-        // language on its own — needed so the summary and the voice that later
-        // reads it aloud (SummarySpeaker, matched to this same `language`) agree.
+        // Name the language explicitly so the summary matches the voice that reads it.
         let instructions = "You write concise summaries of podcast episodes from their transcripts. In 3 to 5 sentences, describe what the episode is about and its key points, written as flowing prose in \(languageName(for: language)). Do not mention that you are an AI, the transcript, or the summarization process."
 
         do {
@@ -388,10 +327,8 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             return
         }
         if let audioFile = loadAudioFile(fromURL: audioFileURL) {
-            let audioFormat = audioFile.processingFormat
-            let frameCount = audioFile.length
-            let sampleRate = Double(audioFormat.sampleRate)
-            let sizeInSeconds = Double(frameCount) / sampleRate
+            let sampleRate = Double(audioFile.processingFormat.sampleRate)
+            let sizeInSeconds = AudioDuration.estimate(audioFileURL)
             if let lastSentenceTimeStamp = allSentences.last?.timestamp {
                 if lastSentenceTimeStamp < (sizeInSeconds - 120) {
                     resumePosition = Int64(lastSentenceTimeStamp) * Int64(sampleRate)
@@ -409,7 +346,6 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             let audioFile = try AVAudioFile(forReading: audioFileURL)
             let audioFormat = audioFile.processingFormat
             let frameCount = audioFile.length
-            // Calculate the buffer size in frames
             let sampleRate = Double(audioFormat.sampleRate)
             let bufferSizeInSeconds = 120.0
             let bufferSizeInFrames = AVAudioFrameCount(bufferSizeInSeconds * sampleRate)
@@ -420,7 +356,6 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             
             await setStatus("Transcribing")
             while frameOffset < frameCount && !Task.isCancelled {
-                // Create an AVAudioPCMBuffer to hold the audio data
                 guard let audioBuffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: bufferSize * 2) else {
                     print("Failed to create audio buffer.")
                     return
@@ -462,22 +397,14 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         recognitionRequest.append(audioBuffer)
         recognitionRequest.endAudio()
 
-        // Captured now — cancelling currentTask/currentTranscriptionTask doesn't
-        // guarantee this buffer's completion handler won't still fire afterward
-        // (e.g. a quick Stop-then-Start, or background transcription racing a
-        // foreground one); checked again below before touching any shared state.
+        // Callbacks from a cancelled run can still fire; checked below.
         let generation = transcriptionGeneration
         do {
             _ = try await withCheckedThrowingContinuation { continuation in
-                // Assigning this is what actually lets cancel()'s
-                // currentTask?.cancel() do anything — it was never previously
-                // captured, so that call was always cancelling nil.
                 currentTask = speechRecognizer.recognitionTask(with: recognitionRequest) { result, error in
                     if let result = result, result.isFinal {
-                        // Get the transcribed text from the result
                         let transcription = result.bestTranscription
 
-                        // Get the word-level timing information
                         var timestamps: [(String, TimeInterval)] = []
 
                         for segment in transcription.segments {
@@ -512,11 +439,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         return true
     }
     
-    // Builds every completed Sentence locally first and publishes once at the end.
-    // Appending to `sentences` (a @Published array) inside the loop fired a separate
-    // SwiftUI re-render — including a full layout pass of the growing transcript list —
-    // per sentence instead of per recognition result, which is what made the UI feel
-    // sluggish as the transcript grew longer.
+    // Builds the sentences locally and publishes once, avoiding a re-render per sentence.
     @MainActor func updateTimestamps(_ timestamps:[(String, TimeInterval)]) {
         var currentSentence = ""
         var sentenceTimestamp: TimeInterval = timestamps[0].1
@@ -564,14 +487,7 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             }
         }
         checkpointFilename = nil
-        // Only a run that actually reached the end of the file gets a whole-episode
-        // summary — one built from a run that stopped partway through wouldn't
-        // actually cover "the whole podcast". This used to check resumePosition == 0
-        // instead, which looked at how close the last sentence's timestamp was to
-        // the file's duration — any episode with more than two minutes of trailing
-        // music or silence after the last spoken word made that look incomplete
-        // even on a run that had genuinely finished, so the summary silently never
-        // appeared.
+        // Only a run that reached the end of the file gets a summary.
         if lastRunReachedEndOfAudio, !allSentences.isEmpty, let fn {
             await summarizeIfNeeded(fn: fn, sentences: allSentences)
         }
@@ -626,7 +542,6 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         ?? target.language.languageCode?.identifier  // deprecated but useful on older bases
             ?? language.lowercased()
 
-        // Look through the SpeechTranscriber-supported locales
         let supported = await SpeechTranscriber.supportedLocales
         for loc in supported {
             let code = loc.language.languageCode?.identifier
@@ -646,54 +561,47 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             audioFile.framePosition = resumePosition
             currentTimeOffset = resumePosition == 0 ? 0 : TimeInterval(resumePosition) / sampleRate
 
-            //Setting locale
             var locale = Locale(identifier: "\(language)_\(Locale.current.language.region!.identifier)")
             
-            // Fallback
             if await !supported(locale: locale) {
                locale = await firstSupportedLocaleMatchingLanguage(language)
             }
             
-            //Creating Transcriber Module
             let transcriber = transcriber(for: locale)
 
-            //Checking Assets
             try await ensureModel(transcriber: transcriber, locale: locale)
             let analyzer = SpeechAnalyzer(modules: [transcriber])
-            
-            try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
+            let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber], considering: audioFile.processingFormat)
+            let input = AudioFileInput(file: audioFile, format: format)
 
             await setStatus("Transcribing")
 
-            for try await result in transcriber.results {
-                if Task.isCancelled {
-                    await analyzer.cancelAndFinishNow()
-                    break
-                }
-                if result.isFinal {
-                    let bestTranscription = result.text // an AttributedString
-                    let plainTextBestTranscription = String(bestTranscription.characters) // a String
-                    
-                    // Get the word-level timing information
-                    var timestamps: [(String, TimeInterval)] = []
-                    
+            let offset = currentTimeOffset
+            let results = Task {
+                for try await result in transcriber.results where result.isFinal {
                     if let t = result.text.runs.first?.audioTimeRange {
-                        let timestamp = self.currentTimeOffset + t.start.seconds
-                        timestamps.append((plainTextBestTranscription, timestamp))
-                        
-                        await self.updateTimestamps(timestamps)
+                        await self.updateTimestamps([(String(result.text.characters), offset + t.start.seconds)])
                         self.saveCheckpoint()
                     }
                 }
             }
+            let lastSample = try await withTaskCancellationHandler {
+                try await analyzer.analyzeSequence(input)
+            } onCancel: {
+                input.stop()
+            }
+            if !Task.isCancelled, let lastSample {
+                try await analyzer.finalizeAndFinish(through: lastSample)
+            } else {
+                await analyzer.cancelAndFinishNow()
+            }
+            try await results.value
             completedFully = !Task.isCancelled
         }
         catch {
             await setStatus("Could not transcribe \(error.localizedDescription)")
         }
-        // Mirrors recognizeSpeech: figure out whether this run stopped (cancellation,
-        // expiration, or an error) with meaningful audio left untranscribed, so a
-        // later call picks up from resumePosition instead of starting over.
+        // Whether this run stopped early, so the next one resumes from resumePosition.
         lastRunReachedEndOfAudio = completedFully
         checkResumable(at, definitelyComplete: completedFully)
     }
@@ -701,13 +609,8 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
     func cancel() {
         currentTask?.cancel()
         currentTranscriptionTask?.cancel()
-        // TranscriberView's Start/Stop button branches on `working` to decide
-        // whether a tap means cancel or start — that only works if `working`
-        // actually reads false by the time this call returns. Button taps are
-        // already on the main thread, so flip it synchronously there; the
-        // MainActor hop is only needed for the one other caller that isn't
-        // already on it — the background transcription task's expirationHandler,
-        // which iOS can invoke on an arbitrary thread.
+        // TranscriberView checks `working` right after this returns, so set it synchronously
+        // on the main thread. The background task's expirationHandler can call from any thread.
         if Thread.isMainThread {
             working = false
         } else {
@@ -758,33 +661,23 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
             sentences = allSentences
             summary = subscriptions?.loadTextFromDisk(filePath: summaryFilename(for: fn)) ?? ""
 
-            // A transcript that looks finished but has no summary yet — e.g. one
-            // made before this feature existed, or before the completion-detection
-            // fix that made summarization actually fire — otherwise sits there
-            // forever: summarizeIfNeeded only ever runs from an active transcribe()
-            // call, and just opening an episode doesn't trigger one.
+            // Backfill a summary for a complete transcript that doesn't have one yet.
             if summary.isEmpty, !array.isEmpty, let url, looksComplete(url, sentences: array) {
-                // `array` (not self.allSentences) is captured by value here, so this
-                // stays correct even if the user switches episodes — and this
-                // Transcriber instance's allSentences gets reset — before it runs.
                 Task { await self.summarizeIfNeeded(fn: fn, sentences: array) }
             }
         }
         return self
     }
 
-    // Best-effort "does this on-disk transcript look finished" check, used only to
-    // decide whether load() should backfill a missing summary. Deliberately doesn't
-    // mutate allSentences/resumePosition the way checkResumable does — this is a
-    // read for a UI decision, not a resume decision.
+    // Whether an on-disk transcript looks finished, for load()'s summary backfill.
+    // Unlike checkResumable, it doesn't change any state.
     private func looksComplete(_ audioFileURL: URL, sentences: [Sentence]) -> Bool {
         if subscriptions?.isTranscriptMarkedComplete(audioFileURL.deletingPathExtension().lastPathComponent) == true {
             return true
         }
-        guard let lastTimestamp = sentences.last?.timestamp,
-              let audioFile = loadAudioFile(fromURL: audioFileURL) else { return false }
-        let sampleRate = Double(audioFile.processingFormat.sampleRate)
-        let sizeInSeconds = Double(audioFile.length) / sampleRate
+        guard let lastTimestamp = sentences.last?.timestamp else { return false }
+        let sizeInSeconds = AudioDuration.estimate(audioFileURL)
+        guard sizeInSeconds > 0 else { return false }
         return lastTimestamp >= sizeInSeconds - 120
     }
     
@@ -796,19 +689,12 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         transcriptionGeneration += 1
 
         audioURL = url
-        // A prior run — this launch or an earlier one, via a checkpoint `load()`
-        // brought back from disk — may have left off partway through. Check before
-        // wiping so that checkpoint isn't discarded unseen.
-        // A transcript marked complete is never "resumed" from its last sentence
-        // just because the episode ends in long music/silence — Start redoes it.
+        // Check for a checkpoint to resume before wiping. Transcripts marked complete are
+        // redone from the start.
         let fn = url.deletingPathExtension().lastPathComponent
         checkResumable(url, definitelyComplete: subscriptions?.isTranscriptMarkedComplete(fn) == true)
         if resumePosition == 0 {
-            // A complete transcript with no summary yet (e.g. transcribed before
-            // this feature existed) gets backfilled from what's already there,
-            // right before it's wiped below — Start still means "redo the
-            // transcription" exactly as before, this just doesn't waste the
-            // existing text.
+            // Backfill a missing summary from the existing transcript before it's wiped.
             if !allSentences.isEmpty {
                 await summarizeIfNeeded(fn: fn, sentences: allSentences)
             }
@@ -826,5 +712,72 @@ final class Transcriber:NSObject, ObservableObject, SFSpeechRecognitionTaskDeleg
         }
         currentTranscriptionTask = runTask
         await runTask.value
+    }
+}
+
+// Feeds an audio file to SpeechAnalyzer a chunk at a time, read on demand. Unlike
+// start(inputAudioFile:), it treats a read error at the end as the end of the file:
+// MP3 lengths are estimates, and AVAudioFile throws eofErr when the estimate is
+// slightly long. SpeechAnalyzer then dropped everything it had read but not yet
+// transcribed, so the episode could never finish.
+@available(iOS 26.0, *)
+final class AudioFileInput: AsyncSequence, @unchecked Sendable {
+    typealias Element = AnalyzerInput
+
+    private let file: AVAudioFile
+    private let converter: AVAudioConverter?
+    private let outputFormat: AVAudioFormat
+    private let chunkFrames: AVAudioFrameCount
+    private let lock = NSLock()
+    private var stopped = false
+
+    init(file: AVAudioFile, format: AVAudioFormat?, chunkSeconds: Double = 10) {
+        self.file = file
+        outputFormat = format ?? file.processingFormat
+        converter = outputFormat == file.processingFormat ? nil : AVAudioConverter(from: file.processingFormat, to: outputFormat)
+        chunkFrames = AVAudioFrameCount(chunkSeconds * file.processingFormat.sampleRate)
+    }
+
+    // Ends the input early, e.g. when the transcription is cancelled.
+    func stop() {
+        lock.withLock { stopped = true }
+    }
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        let input: AudioFileInput
+        mutating func next() async -> AnalyzerInput? {
+            input.nextChunk().map { AnalyzerInput(buffer: $0) }
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(input: self)
+    }
+
+    private func nextChunk() -> AVAudioPCMBuffer? {
+        guard !lock.withLock({ stopped }),
+              let source = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunkFrames) else { return nil }
+        do {
+            try file.read(into: source)
+        } catch {
+            return nil
+        }
+        guard source.frameLength > 0 else { return nil }
+        guard let converter else { return source }
+
+        let ratio = outputFormat.sampleRate / file.processingFormat.sampleRate
+        guard let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: AVAudioFrameCount(Double(source.frameLength) * ratio) + 1024) else { return nil }
+        var supplied = false
+        var error: NSError?
+        converter.convert(to: output, error: &error) { _, status in
+            if supplied {
+                status.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            status.pointee = .haveData
+            return source
+        }
+        return error == nil ? output : nil
     }
 }

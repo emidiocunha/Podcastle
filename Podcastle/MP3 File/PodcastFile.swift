@@ -43,21 +43,16 @@ import Foundation
     // Loads the specified ID3v2 audio file and updates the current chapter based on time.
     func loadFile(_ filename: String, seconds: Double, desc:String?) {
         id3v2file = ID3V2File(filename: filename)
-        // Proceed to set chapter only if chapters are found.
+        // Clear the previous episode's chapter so its artwork doesn't carry over.
+        currentChapter = nil
+        hasChapters = false
         if id3v2file?.chapters().count ?? 0 > 0 {
             hasChapters = true
+        } else if let desc, let chapters = id3v2file?.createChapters(from: desc), chapters.count > 0 {
+            hasChapters = true
+        }
+        if hasChapters {
             updateCurrentChapter(seconds)
-        } else {
-            // Clear current chapter if no chapter data is available.
-            if let desc = desc {
-                if let chapters = id3v2file?.createChapters(from: desc), chapters.count > 0 {
-                    updateCurrentChapter(seconds)
-                    updateCurrentChapter(seconds)
-                }
-            } else {
-                currentChapter = nil
-                hasChapters = false
-            }
         }
     }
     

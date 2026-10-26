@@ -36,18 +36,12 @@ import UserNotifications
 public let kAppRefreshIdentifier = "com.mobyte.voicefeed.Refresh"
 public let kBackgroundIdentifier = "com.mobyte.voicefeed.backgroundDownload"
 public let kTranscriptionBackgroundIdentifier = "com.mobyte.voicefeed.transcribe"
-// UserDefaults key for the "Background Transcription" toggle in MainView's More
-// menu. Registered with a `true` default at launch (see AppDelegate) rather than
-// relying on @AppStorage's own registration, since AppDelegate can read/act on it
-// (didFinishLaunchingWithOptions, scheduling) before any SwiftUI view has run.
+// "Background Transcription" toggle in the More menu. Its default is registered in
+// AppDelegate, which reads it before any SwiftUI view runs.
 public let kBackgroundTranscriptionEnabledKey = "backgroundTranscriptionEnabled"
-// Whether MainView has shown the one-time "enable background transcription?"
-// onboarding prompt yet — asked once regardless of the answer.
+// Whether the one-time background transcription prompt has been shown.
 public let kBackgroundTranscriptionOnboardingShownKey = "backgroundTranscriptionOnboardingShown"
-// "Continue Playing" in the More menu — auto-advances to the most recent unplayed
-// downloaded episode when the current one finishes. On by default, unlike
-// background transcription: it costs nothing extra (just picks what plays next)
-// rather than battery, so there's no need to ask before turning it on.
+// "Continue Playing" in the More menu: auto-advance to the next unplayed episode.
 public let kContinuePlayingEnabledKey = "continuePlayingEnabled"
 @MainActor public var kScreenScale = 2.0
 
@@ -57,12 +51,13 @@ struct PodcastleApp: App {
     @State private var accentColor: Color = .blue
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State private var subscriptions: Subscriptions?
-    @StateObject var downloadStatus = DownloadStatus()
-    @StateObject var downloads = Downloads()
-    @StateObject var transcriber = Transcriber()
-    @StateObject var player = PodcastPlayer()
-    @StateObject var file = PodcastFile()
+    // Shared with Siri intents and background tasks, which run without any UI.
+    @StateObject var downloadStatus = PodcastleServices.shared.downloadStatus
+    @StateObject var transcriber = PodcastleServices.shared.transcriber
+    @StateObject var player = PodcastleServices.shared.player
+    @StateObject var file = PodcastleServices.shared.file
     @StateObject var imageCache = ImageCache()
+    private var downloads: Downloads { PodcastleServices.shared.downloads }
      
     var body: some Scene {
         WindowGroup {
@@ -87,20 +82,9 @@ struct PodcastleApp: App {
                 ProgressView()
                     .task {
                         do {
-                            // Shared with AppDelegate — a background-task launch may
-                            // already have created it before this view ever ran.
-                            let subscriptions = try appDelegate.sharedSubscriptions()
-                            self.subscriptions = subscriptions
-                            await self.subscriptions?.setup(downloads: downloads)
-                            appDelegate.registerSubscriptions(subscriptions)
-                            await checkMigration()
-                            await downloads.setup(status: downloadStatus)
-                            player.setup(subscriptions: subscriptions, transcriber: transcriber, file:file, downloads:downloads)
-                            appDelegate.registerDownloads(downloads)
-                            appDelegate.registerPlayer(player)
-                            CarPlayController.shared.player = player
-                            CarPlayController.shared.file = file
-                            CarPlayController.shared.subscriptions = subscriptions
+                            // A Siri intent or background task may already have done this setup.
+                            self.subscriptions = try PodcastleServices.shared.sharedSubscriptions()
+                            try await PodcastleServices.shared.start()
                         } catch {
                             print("Could not initialize: \(error)")
                         }
@@ -128,22 +112,73 @@ struct PodcastleApp: App {
             }
         }
     }
-    
-    func checkMigration() async {
-        let migration = Migration(modelContainer: subscriptions!.modelContainer)
-        // Needed for some helper functions
-        await migration.setup(subscriptions: subscriptions!)
-        // If migration from JSON files to SwiftData is needed...
+}
+
+// The app's long-lived objects, owned here rather than by PodcastleApp so Siri
+// intents and background tasks on a cold launch use the same instances as the UI.
+@MainActor
+final class PodcastleServices {
+    static let shared = PodcastleServices()
+    private init() {}
+
+    let downloadStatus = DownloadStatus()
+    let downloads = Downloads()
+    let transcriber = Transcriber()
+    let player = PodcastPlayer()
+    let file = PodcastFile()
+    weak var appDelegate: AppDelegate?
+
+    private var subscriptions: Subscriptions?
+    private var startTask: Task<Subscriptions, Error>?
+
+    // The single Subscriptions instance, so there's never a second ModelContainer.
+    func sharedSubscriptions() throws -> Subscriptions {
+        if let subscriptions { return subscriptions }
+        let sub = try Subscriptions(modelContainer: ModelContainer(for: Directory.self, Episode.self, configurations: ModelConfiguration(isStoredInMemoryOnly: false)))
+        subscriptions = sub
+        return sub
+    }
+
+    // Full app setup. Runs once; every caller waits for that same run.
+    @discardableResult
+    func start() async throws -> Subscriptions {
+        if let startTask { return try await startTask.value }
+        let task = Task { () throws -> Subscriptions in
+            let subscriptions = try sharedSubscriptions()
+            await subscriptions.setup(downloads: downloads)
+            appDelegate?.registerSubscriptions(subscriptions)
+            await migrateIfNeeded(subscriptions)
+            await downloads.setup(status: downloadStatus)
+            player.setup(subscriptions: subscriptions, transcriber: transcriber, file: file, downloads: downloads)
+            appDelegate?.registerDownloads(downloads)
+            appDelegate?.registerPlayer(player)
+            CarPlayController.shared.player = player
+            CarPlayController.shared.file = file
+            CarPlayController.shared.subscriptions = subscriptions
+            PodcastleShortcuts.updateAppShortcutParameters()
+            updateSiriIndex()
+            return subscriptions
+        }
+        startTask = task
+        do {
+            return try await task.value
+        } catch {
+            // Let a later caller try again rather than replaying this failure.
+            startTask = nil
+            throw error
+        }
+    }
+
+    private func migrateIfNeeded(_ subscriptions: Subscriptions) async {
+        let migration = Migration(modelContainer: subscriptions.modelContainer)
+        await migration.setup(subscriptions: subscriptions)
         if await migration.needsMigration() {
             await migration.migrateJSON()
         }
     }
 }
 
-// BGProcessingTask's expirationHandler can fire concurrently with the work it's
-// guarding against — both paths want to call setTaskCompleted, but doing that twice
-// is a misuse the system logs and penalizes. This makes "whoever gets there first
-// wins, the other is a no-op" thread-safe.
+// Makes setTaskCompleted run once, whether the work or the expirationHandler gets there first.
 private final class TaskCompletion {
     private let lock = NSLock()
     private var finished = false
@@ -151,6 +186,10 @@ private final class TaskCompletion {
 
     init(_ task: BGProcessingTask) {
         self.task = task
+    }
+
+    var isFinished: Bool {
+        lock.withLock { finished }
     }
 
     func complete(_ success: Bool) {
@@ -163,8 +202,7 @@ private final class TaskCompletion {
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
-    // Tapping the "summary ready" notification should open straight to that
-    // episode's player/transcript, not just bring the app to the foreground.
+    // Opens the episode from a tapped "summary ready" notification.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler completionHandler: @escaping () -> Void) {
@@ -174,8 +212,7 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             return
         }
         guard subscriptions != nil, player != nil else {
-            // Cold launch: PodcastleApp's async setup hasn't registered these yet —
-            // flushed by registerSubscriptions/registerPlayer once it has.
+            // Cold launch: opened once registerSubscriptions/registerPlayer have run.
             pendingNotificationEpisodeAudioURL = audioURL
             return
         }
@@ -188,25 +225,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private var subscriptions:Subscriptions?
     private var downloads:Downloads?
     private var player:PodcastPlayer?
-    // Set when iOS relaunches the app in the background to deliver background URLSession
-    // events before PodcastleApp's async setup task has finished and called registerDownloads.
-    // Flushed as soon as downloads becomes available so the completion handler is never dropped.
+    // Background URLSession events and tapped notifications that arrive before setup
+    // finishes are held here until it does.
     private var pendingBackgroundSessionCompletion: (identifier: String, handler: () -> Void)?
-    // Same idea for a "summary ready" notification tapped on a cold launch —
-    // subscriptions/player haven't finished their async setup yet, so the episode
-    // it points to is remembered and opened once registerSubscriptions/registerPlayer
-    // have both run.
     private var pendingNotificationEpisodeAudioURL: String?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     )  -> Bool {
-        // Off by default — MainView's one-time onboarding prompt is what turns
-        // this on, since it costs battery and the user should opt in knowingly
-        // rather than finding out it's already been running.
+        // Off by default: it costs battery, so the onboarding prompt asks first.
         UserDefaults.standard.register(defaults: [
             kBackgroundTranscriptionEnabledKey: false,
             kContinuePlayingEnabledKey: true
         ])
+        PodcastleServices.shared.appDelegate = self
         _ = CarPlaySceneDelegate.self  // prevent linker dead-stripping
         let cls = NSClassFromString("CarPlaySceneDelegate")
         print("🚗 launch: CarPlaySceneDelegate class = \(String(describing: cls))")
@@ -218,17 +249,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return true
     }
 
-    // The one Subscriptions instance for the whole process. Lives here rather than
-    // only in PodcastleApp's state because when iOS launches the app purely to run
-    // the transcription BGTask, no window is shown and PodcastleApp's setup `.task`
-    // never runs — the task has to be able to build Subscriptions itself. Whichever
-    // side gets here first creates it; the other reuses it, so there's never a
-    // second ModelContainer on the same store.
+    // See PodcastleServices.sharedSubscriptions.
     func sharedSubscriptions() throws -> Subscriptions {
-        if let subscriptions { return subscriptions }
-        let sub = try Subscriptions(modelContainer: ModelContainer(for: Directory.self, Episode.self, configurations: ModelConfiguration(isStoredInMemoryOnly: false)))
-        subscriptions = sub
-        return sub
+        try PodcastleServices.shared.sharedSubscriptions()
     }
 
     func registerSubscriptions(_ sub:Subscriptions) {
@@ -247,8 +270,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         Task { await openEpisode(audioURL: audioURL) }
     }
 
-    // Needed so a summary finishing while the app is backgrounded (interactively
-    // or via the transcription BGTask) can actually alert the user.
     func requestNotificationAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
             if let error {
@@ -259,8 +280,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func registerDownloads(_ d:Downloads) {
         downloads = d
-        // Flush a handoff that arrived before PodcastleApp's async setup finished —
-        // otherwise the completion handler would be dropped forever (see below).
         if let pending = pendingBackgroundSessionCompletion {
             pendingBackgroundSessionCompletion = nil
             Task {
@@ -269,16 +288,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    // iOS calls this when a background URLSession has events to deliver. This can happen
-    // as soon as the app is relaunched into the background — potentially before
-    // PodcastleApp's async setup task has run and called registerDownloads(), in which case
-    // `downloads` is still nil here. Buffer the handoff instead of dropping it: failing to
-    // ever call completionHandler gets the app penalized by iOS, and skipping
-    // setBackgroundCompletionHandler means the background session/delegate never
-    // reconnects, so pending download-completion events are never delivered either.
-    // We must create/reconnect to the same session and call the completion
-    // handler only after urlSessionDidFinishEvents fires — telling iOS the
-    // app is done processing so it can take a new snapshot.
+    // Called when a background URLSession has events, possibly before setup has called
+    // registerDownloads(). Buffered rather than dropped: the completion handler must be
+    // called after urlSessionDidFinishEvents, or iOS penalizes the app.
     func application(_ application: UIApplication,
                      handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
@@ -297,20 +309,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func registerBackgroundTasks() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier:kBackgroundIdentifier, using: nil) { task in
-            // Handle the background task execution
-            task.expirationHandler = {
+            guard let processingTask = task as? BGProcessingTask else {
                 task.setTaskCompleted(success: false)
+                return
             }
-            Task {
-                // Perform background refresh
-                await self.subscriptions?.backgroundRefresh()
-                
-                // Ensure completion is called on main thread
-                await MainActor.run {
-                    task.setTaskCompleted(success: true)
+            let completion = TaskCompletion(processingTask)
+            let work = Task {
+                // Background launches show no window, so setup happens here.
+                guard let subscriptions = try? await PodcastleServices.shared.start() else {
+                    completion.complete(false)
+                    return
                 }
+                await subscriptions.backgroundRefresh()
+                completion.complete(true)
             }
-            // Schedule next refresh
+            task.expirationHandler = {
+                work.cancel()
+                completion.complete(false)
+            }
             self.scheduleAppRefresh()
         }
 
@@ -323,25 +339,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
     }
 
-    // Transcribes one downloaded-but-untranscribed (or partially transcribed) episode
-    // per wake. Runs a scratch Transcriber rather than the one wired into the live
-    // player/UI, so a background run never clobbers whatever the user has on screen —
-    // both write the same per-episode .json checkpoint file, so the UI picks up
-    // whatever background transcription completed next time that episode is opened.
+    // Transcribes one episode per wake, using its own Transcriber so it never touches
+    // what's on screen. The UI picks up the saved transcript next time it's opened.
     func handleTranscriptionTask(_ task: BGProcessingTask) {
         let completion = TaskCompletion(task)
-        // Turned off in the More menu — nothing to do, and no reschedule below
-        // means the chain of wakes stops here until the user turns it back on.
+        // Disabled: no reschedule, so the wakes stop until it's turned back on.
         guard UserDefaults.standard.bool(forKey: kBackgroundTranscriptionEnabledKey) else {
             completion.complete(true)
             return
         }
-        // Low Power Mode usually means the user is specifically trying to stretch
-        // a low battery — this is exactly the kind of background CPU work that
-        // should sit out until it's off again. Unlike the disabled-setting case
-        // above, this is transient, so (unlike that one) it still explicitly
-        // queues the next wake itself — if the device is still in Low Power Mode
-        // next time too, it's skipped again then.
+        // Skip while in Low Power Mode, but keep the next wake queued.
         guard !ProcessInfo.processInfo.isLowPowerModeEnabled else {
             print("Skipping background transcription: Low Power Mode is on.")
             Self.scheduleTranscriptionRefresh()
@@ -351,44 +358,38 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let transcriber = Transcriber()
 
         task.expirationHandler = {
-            // Cancel cooperatively — Transcriber checkpoints as it goes, so whatever
-            // it finished transcribing before expiration is already saved to disk,
-            // and the next wake resumes from there instead of starting over.
+            // Transcriber checkpoints as it goes, so the next wake resumes from here.
             transcriber.cancel()
             completion.complete(false)
         }
 
-        // Queue the next attempt right away, the same way registerBackgroundTasks
-        // does above for the download-refresh task — NOT after this run finishes.
-        // expirationHandler only gets a short grace period, and if our cancellation
-        // doesn't unwind fast enough the process can be torn down before it runs at
-        // all; scheduling up front means a request is already sitting in
-        // BGTaskScheduler regardless of how this run ends.
+        // Schedule the next wake now, not at the end: an expired run can be killed before
+        // it gets that far.
         Self.scheduleTranscriptionRefresh()
 
         Task {
-            // On a cold background launch PodcastleApp's setup hasn't run (and
-            // won't, with no window shown), so build Subscriptions here if needed.
             guard let subscriptions = try? self.sharedSubscriptions() else {
                 completion.complete(false)
                 return
             }
             transcriber.setup(subscriptions: subscriptions)
             guard let action = await subscriptions.nextBackgroundTranscriptionAction() else {
-                // Nothing needs doing right now.
                 completion.complete(true)
                 return
             }
             switch action {
             case .transcribe(let episode):
                 guard let url = episode.fullLocalUrl(.audio) else { break }
-                // load() detects and sets the episode's language itself now.
+                let base = url.deletingPathExtension().lastPathComponent
+                let progressBefore = subscriptions.transcriptProgress(base)
                 _ = transcriber.load(url, title: episode.title, desc: episode.desc, episodeAudioURL: episode.audio)
                 await transcriber.transcribe(url)
+                // A run iOS cut short doesn't count against the episode.
+                if !completion.isFinished {
+                    await subscriptions.recordBackgroundRun(base, progressBefore: progressBefore)
+                }
             case .summarizeOnly(let episode):
-                // Already fully transcribed — just retry the summary (e.g. the
-                // on-device model was still downloading/preparing last time)
-                // without redoing potentially hours of finished transcription.
+                // Already transcribed; just retry the summary.
                 guard let url = episode.fullLocalUrl(.audio) else { break }
                 await transcriber.summarizeExistingTranscript(url, title: episode.title, desc: episode.desc, episodeAudioURL: episode.audio)
             }
@@ -403,7 +404,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
         let request = BGProcessingTaskRequest(identifier: kTranscriptionBackgroundIdentifier)
-        // On-device speech recognition needs no network, just CPU time.
         request.requiresNetworkConnectivity = false
         request.requiresExternalPower = false
         request.earliestBeginDate = .now.addingTimeInterval(1800)

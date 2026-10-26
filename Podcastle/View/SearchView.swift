@@ -171,7 +171,10 @@ struct SearchViewItem: View {
                 Spacer()
             }
         }
+        .siriPodcast(item.feed)
         .task {
+            // So Siri can follow this result by voice ("follow this podcast").
+            DiscoveredPodcasts.register(item, needsLookup: top)
             let result = await subscriptions.isSubscribed(podcastId: item.its_id)
             isSubscribed = result
         }
@@ -186,13 +189,9 @@ struct SearchView: View {
     @State var showSuccessAlert = false
     @State private var isLoading = false
     @State private var isSearchingLive = false
-    // Debounced live search: cancelling the previous attempt when a newer
-    // keystroke supersedes it genuinely cuts the in-flight network request short
-    // (Downloads.download checks Task cancellation), not just its stale response.
+    // Cancelling the previous debounced search also cancels its network request.
     @State private var liveSearchTask: Task<Void, Never>?
-    // Guards against a slow, superseded search's response landing after a newer
-    // one already updated the results — cancellation alone isn't quite enough to
-    // rely on, since it's cooperative and checked only periodically.
+    // Drops responses from searches that a newer one has superseded.
     @State private var searchGeneration = 0
     let directory = PodcastDirectorySearch()
     @Environment(\.dismissSearch) var dismissSearch
@@ -204,9 +203,6 @@ struct SearchView: View {
     // Short enough to feel live, long enough that a normal typing cadence only
     // fires one request per pause rather than one per keystroke.
     private let liveSearchDebounce: Duration = .milliseconds(350)
-    // Below this, a query is too broad to be worth a round trip on every pause —
-    // still saves network for the first character or two, same spirit as only
-    // searching on submit before, just far more responsive past that point.
     private let liveSearchMinimumLength = 2
 
     var body: some View {
@@ -236,9 +232,7 @@ struct SearchView: View {
                 scheduleLiveSearch(for: newValue)
             }
             .onSubmit(of: .search) {
-                // An explicit Return/submit always runs right away, regardless of
-                // length or any pending debounce — e.g. pasting a feed URL, or
-                // just not wanting to wait out the pause.
+                // Submit runs right away, whatever the length or pending debounce.
                 liveSearchTask?.cancel()
                 performSearch(searchText, dismissAfterward: true, showBlockingOverlay: true)
             }
@@ -281,18 +275,13 @@ struct SearchView: View {
         return false
     }
 
-    // Cancels whatever the previous keystroke scheduled, then — once typing has
-    // paused and there's enough text to be worth it — runs the search for real.
-    // No one types a feed URL character by character expecting live results from
-    // it, so that case is still left to an explicit submit only.
+    // Debounced search as the user types. Feed URLs are only searched on submit.
     private func scheduleLiveSearch(for text: String) {
         liveSearchTask?.cancel()
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            // Cleared back to nothing — snap straight back to the popular-podcasts
-            // view (same fetch as onAppear) rather than waiting out a pause, and
-            // rather than just blanking the list.
+            // Cleared: show popular podcasts again straight away.
             searchGeneration += 1
             let generation = searchGeneration
             top = true
@@ -313,9 +302,7 @@ struct SearchView: View {
         }
     }
 
-    // Shared by both the debounced live search and an explicit Return/submit —
-    // only the loading indicator and whether the keyboard dismisses afterward
-    // differ between the two.
+    // Used by both live search and submit.
     private func performSearch(_ text: String, dismissAfterward: Bool, showBlockingOverlay: Bool) {
         searchGeneration += 1
         let generation = searchGeneration

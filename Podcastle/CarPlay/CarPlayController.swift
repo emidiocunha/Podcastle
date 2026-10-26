@@ -51,13 +51,9 @@ class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate {
     }
 }
 
-// Bridges PodcastPlayer + PodcastFile to the CarPlay template hierarchy.
-// Root template: CPListTemplate of podcasts. CPNowPlayingTemplate (artwork + transport
-// controls via MPNowPlayingInfoCenter) is pushed on top of it — Apple only supports
-// pushing the shared Now Playing template, not making it the root. With it as root,
-// anything pushed above it (the podcasts list) could get popped right back off the
-// first time the system itself brought Now Playing forward.
-// Chapters: CPListTemplate pushed above Now Playing; current chapter marked with a speaker icon.
+// Bridges PodcastPlayer + PodcastFile to CarPlay. The root is a list of podcasts;
+// Now Playing is pushed on top (Apple doesn't support it as the root), and the
+// chapters list above that, with the current chapter marked.
 @MainActor
 final class CarPlayController {
     static let shared = CarPlayController()
@@ -212,7 +208,7 @@ final class CarPlayController {
                                   image: image)
             item.handler = { [weak self] _, completion in
                 Task { @MainActor in
-                    self?.player?.absoluteSeek(Double(chapter.startTime) / 1000.0)
+                    self?.player?.playChapter(chapter)
                     self?.interfaceController?.popTemplate(animated: true, completion: nil)
                     completion()
                 }
@@ -232,9 +228,8 @@ final class CarPlayController {
         cancellables.removeAll()
         guard let file = file else { return }
 
-        // currentChapter fires on every chapter boundary and on episode change (nil ↔ non-nil).
-        // This covers both refreshing the "current" marker in the list and
-        // showing/hiding the chapters button when episodes with/without chapters are loaded.
+        // Fires on chapter boundaries and episode changes: refreshes the current chapter
+        // marker and shows/hides the chapters button.
         file.$currentChapter
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in

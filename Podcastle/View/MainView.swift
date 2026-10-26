@@ -146,17 +146,14 @@ struct PodcastItemView: View {
         }
     }
     
+    // A tap only makes this the current episode; playback is started from the
+    // player. Whatever was playing is paused rather than left running under it.
     func changeTo() {
-        let p = player.isPlaying
-        if p {
+        guard player.currentPodcast != item.episode else { return }
+        if player.isPlaying {
             player.pause()
         }
-        if player.currentPodcast != item.episode {
-            _ = player.setPodcast(item.episode)
-        }
-        if !p {
-            player.play()
-        }
+        _ = player.setPodcast(item.episode)
     }
 }
 
@@ -267,11 +264,13 @@ struct PodcastListView: View {
     @State private var feed: [GroupedEpisodeList] = []
     @State private var pendingPodcasts: [Directory] = []
     @State private var showOnboard = false
+    // For OnboardView's Add a Podcast button.
+    @Binding var showingSearch: Bool
 
     var body: some View {
         VStack {
             if showOnboard {
-                OnboardView()
+                OnboardView(addPodcast: { showingSearch = true })
             } else {
                 List {
                     ForEach(pendingPodcasts, id: \.persistentModelID) { dir in
@@ -293,6 +292,7 @@ struct PodcastListView: View {
                             }
                             .tint(.red)
                         }
+                        .siriEpisode(item.episode.audio)
                         .padding(.top, 8).padding(.bottom, 9)
                     }
                 }
@@ -329,140 +329,48 @@ struct MainView: View {
     @State private var presentationDetent = PresentationDetent.height(144.0)
     @State var themeColor = Color.clear
     @State var title = "Podcastle"
-    // Global on/off for the BGProcessingTask that transcribes downloaded episodes
-    // in the background (see PodcastleApp's scheduleTranscriptionRefresh). The
-    // shared key/default are registered at launch so AppDelegate reads the same
-    // value this switch controls. Off by default — the one-time onboarding prompt
-    // below is what turns it on.
+    // The player sits beside the list (ArrangementView) only on an open iPhone Duo with
+    // the app full screen; otherwise it's the bottom sheet.
+    @State private var hingeOpen = false
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    // Off by default; the one-time onboarding prompt turns it on.
     @AppStorage(kBackgroundTranscriptionEnabledKey) var backgroundTranscriptionEnabled = false
-    @AppStorage(kBackgroundTranscriptionOnboardingShownKey) private var backgroundTranscriptionOnboardingShown = false
-    @State private var showBackgroundTranscriptionOnboarding = false
-    // Auto-advance to the most recent unplayed downloaded episode when the
-    // current one finishes (see PodcastPlayer's end-of-playback handler). On by
-    // default — unlike background transcription, this doesn't cost battery, so
-    // there's no onboarding prompt gating it.
     @AppStorage(kContinuePlayingEnabledKey) var continuePlayingEnabled = true
   
     var body: some View {
         NavigationStack {
             ZStack(alignment: Alignment.top) {
-                PodcastListView()
-                    .listStyle(.plain)
-                    //.navigationTitle(title)
-                    //.navigationBarTitleDisplayMode(.automatic)
-                    .refreshable {
-                        Task {
-                            await subscriptions.refresh()
-                        }
-                    }
-                    //.toolbarBackground(themeColor, for: .navigationBar)
-                    //.toolbarBackground(.visible, for: .navigationBar)
-                    //.toolbarColorScheme(.dark, for: .navigationBar)
-                    .toolbar {
-                        ToolbarItemGroup(placement: .navigationBarLeading) {
-                            Button(action: { showingSearch.toggle() }) {
-                                Label("Add Podcast", systemImage: "plus")
-                            }
-                        }
-                        ToolbarItemGroup(placement: .navigationBarTrailing) {
-                            Menu {
-                                Button(action: { showingFeedback.toggle() }) {
-                                    Label("Send Feedback", systemImage: "hand.thumbsup")
-                                }
-                                Button(action: { showingSubscriptions.toggle() }) {
-                                    Label("Manage Podcasts", systemImage: "checklist")
-                                }
-                                Button(action: {
-                                    if let url = URL(string: "https://www.alimentestaideia.pt/Donation") {
-                                        UIApplication.shared.open(url)
-                                    }
-                                }) {
-                                    Label("Donate", systemImage: "heart.fill")
-                                }
-                                Button(action: { showingLog.toggle() }) {
-                                    Label("View Log", systemImage: "list.bullet.rectangle.portrait")
-                                }
-                                Button(action: {
-                                    showingClearCacheAlert.toggle()
-                                }) {
-                                    Label("Clear Cache", systemImage: "trash")
-                                }
-                                Toggle(isOn: $backgroundTranscriptionEnabled) {
-                                    Label("Background Transcription", systemImage: "waveform.badge.mic")
-                                }
-                                Toggle(isOn: $continuePlayingEnabled) {
-                                    Label("Continue Playing", systemImage: "forward.end.fill")
-                                }
-                            } label: {
-                                Label("More", systemImage: "ellipsis")
-                            }
-                        }
-                    }
-                    .sheet(isPresented:$showingPlayer) {
+                if #available(anyAppleOS 27.1, *), hingeOpen, horizontalSizeClass == .regular {
+                    ArrangementView {
+                        podcastList
+                            // Split beside the player, the list sits right up
+                            // against the screen edge without some extra margin.
+                            .contentMargins(.horizontal, 16, for: .scrollContent)
+                    } secondary: {
                         PlayerView(themeColor:$themeColor, title:$title, detent:$presentationDetent)
-                            .presentationDetents ([.large, .height(144)], selection:$presentationDetent)
-                            .presentationBackground(.black)
-                            .presentationBackgroundInteraction(.enabled)
-                            .presentationDragIndicator(.visible)
-                            .interactiveDismissDisabled()
-                            .environmentObject(player)
-                            .environmentObject(file)
-                            .sheet(isPresented: $showingSearch) {
-                                SearchView()
-                                    .presentationDetents([.large])
-                            }
-                            .sheet(isPresented: $showingLog) {
-                                LogView()
-                                    .presentationDetents([.large])
-                            }
-                            .sheet(isPresented: $showingFeedback) {
-                                FeedbackView()
-                                    .presentationDetents([.large])
-                            }
-                            .sheet(isPresented: $showingSubscriptions) {
-                                ManagePodcastsView()
-                                    .presentationDetents([.large])
-                            }
-.alert(isPresented: $showingClearCacheAlert) {
-                                Alert(
-                                    title: Text("Confirm Clear Cache"),
-                                    message: Text("This will delete every image and audio file"),
-                                    primaryButton: .destructive(Text("Continue")) {
-                                        imageCache.prune(true)
-                                    },
-                                    secondaryButton: .cancel())
-                            }
-                            // Alongside showingClearCacheAlert above, not on the
-                            // NavigationStack that presents this sheet — an alert
-                            // and this sheet both trying to present from the same
-                            // underlying view controller is a real conflict (not a
-                            // timing one: a delay didn't fix it) that left the
-                            // sheet simply never appearing. Attached here, inside
-                            // the sheet's own content, it presents from the
-                            // sheet's own hosting controller instead, same as
-                            // showingClearCacheAlert already does safely.
-                            .task {
-                                // Asked once, ever, regardless of the answer — the
-                                // More menu switch covers changing your mind
-                                // either way after this.
-                                if !backgroundTranscriptionOnboardingShown {
-                                    showBackgroundTranscriptionOnboarding = true
-                                }
-                            }
-                            .alert("Background Transcription", isPresented: $showBackgroundTranscriptionOnboarding) {
-                                Button("Enable") {
-                                    backgroundTranscriptionEnabled = true
-                                    backgroundTranscriptionOnboardingShown = true
-                                }
-                                Button("Not Now", role: .cancel) {
-                                    backgroundTranscriptionOnboardingShown = true
-                                }
-                            } message: {
-                                Text("Podcastle can now transcribe your podcasts in the background, and also provide a summary of the contents. Would you like to enable it?\n\nCaution: this will consume more battery, and you can always disable it later in the More menu.")
-                            }
+                            .splitArrangementLayoutSize(idealHeight: 144.0)
                     }
+                    .arrangementViewStyle(.split)
+                    .modifier(presentations)
+                } else {
+                    podcastList
+                        .sheet(isPresented:$showingPlayer) {
+                            // Presented from inside the player sheet: presenting from the NavigationStack
+                            // alongside this sheet stopped the sheet from appearing.
+                            PlayerView(themeColor:$themeColor, title:$title, detent:$presentationDetent)
+                                .presentationDetents ([.large, .height(144)], selection:$presentationDetent)
+                                .presentationBackground(.black)
+                                .presentationBackgroundInteraction(.enabled)
+                                .presentationDragIndicator(.visible)
+                                .interactiveDismissDisabled()
+                                .environmentObject(player)
+                                .environmentObject(file)
+                                .modifier(presentations)
+                        }
+                }
             }
         }
+        .modifier(HingeDetector(hingeOpen: $hingeOpen))
         .onChange(of: scenePhase) { oldScene, newScenePhase in
             switch newScenePhase {
             case .active:
@@ -484,20 +392,157 @@ struct MainView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openPlayerNotification)) { _ in
-            // AppDelegate already loaded the tapped notification's episode into
-            // `player` by the time this fires — just bring the sheet up so the
-            // user actually sees it instead of landing on the collapsed mini player.
+            // The episode is already loaded; expand the player to show it.
             showingPlayer = true
             presentationDetent = .large
         }
         .onChange(of: backgroundTranscriptionEnabled) { _, enabled in
-            // Submits a request as soon as it's turned on, rather than waiting for
-            // the next launch/backgrounding to do it — otherwise an app that's
-            // killed instead of backgrounded would never have one queued.
-            // Turning it off cancels any already-queued request (the scheduler
-            // does that itself when it sees the setting is off).
+            // Queue (or cancel) the background transcription request right away.
             AppDelegate.scheduleTranscriptionRefresh()
         }
+    }
+
+    private var podcastList: some View {
+        PodcastListView(showingSearch: $showingSearch)
+            .listStyle(.plain)
+            .refreshable {
+                Task {
+                    await subscriptions.refresh()
+                }
+            }
+            .toolbar {
+                ToolbarItemGroup(placement: .navigationBarLeading) {
+                    Button(action: { showingSearch.toggle() }) {
+                        Label("Add Podcast", systemImage: "plus")
+                    }
+                }
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    moreMenu
+                }
+            }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button(action: { showingFeedback.toggle() }) {
+                Label("Send Feedback", systemImage: "hand.thumbsup")
+            }
+            Button(action: { showingSubscriptions.toggle() }) {
+                Label("Manage Podcasts", systemImage: "checklist")
+            }
+            Button(action: {
+                if let url = URL(string: "https://www.alimentestaideia.pt/Donation") {
+                    UIApplication.shared.open(url)
+                }
+            }) {
+                Label("Donate", systemImage: "heart.fill")
+            }
+            Button(action: { showingLog.toggle() }) {
+                Label("View Log", systemImage: "list.bullet.rectangle.portrait")
+            }
+            Button(action: {
+                showingClearCacheAlert.toggle()
+            }) {
+                Label("Clear Cache", systemImage: "trash")
+            }
+            Toggle(isOn: $backgroundTranscriptionEnabled) {
+                Label("Background Transcription", systemImage: "waveform.badge.mic")
+            }
+            Toggle(isOn: $continuePlayingEnabled) {
+                Label("Continue Playing", systemImage: "forward.end.fill")
+            }
+        } label: {
+            Label("More", systemImage: "ellipsis")
+        }
+    }
+
+    private var presentations: MainPresentations {
+        MainPresentations(showingSearch: $showingSearch,
+                          showingLog: $showingLog,
+                          showingFeedback: $showingFeedback,
+                          showingSubscriptions: $showingSubscriptions,
+                          showingClearCacheAlert: $showingClearCacheAlert)
+    }
+}
+
+// Reports whether the device has a hinge that isn't shut. DeviceHingeContext.hinge
+// is nil on devices without one (and before iOS 27.1 there's nothing to ask).
+private struct HingeDetector: ViewModifier {
+    @Binding var hingeOpen: Bool
+
+    func body(content: Content) -> some View {
+        if #available(anyAppleOS 27.1, *) {
+            content.onHingeChange { _, context in
+                guard let hinge = context.hinge else {
+                    hingeOpen = false
+                    return
+                }
+                hingeOpen = hinge.status != .closed
+            }
+        } else {
+            content
+        }
+    }
+}
+
+// The sheets and alerts reachable from MainView's toolbar. Shared by both
+// layouts, which differ only in where they have to be attached (see body).
+private struct MainPresentations: ViewModifier {
+    @EnvironmentObject var imageCache: ImageCache
+    @EnvironmentObject var subscriptions: Subscriptions
+    @Binding var showingSearch: Bool
+    @Binding var showingLog: Bool
+    @Binding var showingFeedback: Bool
+    @Binding var showingSubscriptions: Bool
+    @Binding var showingClearCacheAlert: Bool
+    @State private var showBackgroundTranscriptionOnboarding = false
+    @AppStorage(kBackgroundTranscriptionEnabledKey) var backgroundTranscriptionEnabled = false
+    @AppStorage(kBackgroundTranscriptionOnboardingShownKey) private var backgroundTranscriptionOnboardingShown = false
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $showingSearch) {
+                SearchView()
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $showingLog) {
+                LogView()
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $showingFeedback) {
+                FeedbackView()
+                    .presentationDetents([.large])
+            }
+            .sheet(isPresented: $showingSubscriptions) {
+                ManagePodcastsView()
+                    .presentationDetents([.large])
+            }
+            .alert(isPresented: $showingClearCacheAlert) {
+                Alert(
+                    title: Text("Confirm Clear Cache"),
+                    message: Text("This will delete every image and audio file"),
+                    primaryButton: .destructive(Text("Continue")) {
+                        imageCache.prune(true)
+                    },
+                    secondaryButton: .cancel())
+            }
+            .task(id: showingSearch) {
+                // Asked once, and only once there's a podcast to transcribe.
+                guard !showingSearch, !backgroundTranscriptionOnboardingShown,
+                      await subscriptions.podcastCount() > 0 else { return }
+                showBackgroundTranscriptionOnboarding = true
+            }
+            .alert("Background Transcription", isPresented: $showBackgroundTranscriptionOnboarding) {
+                Button("Enable") {
+                    backgroundTranscriptionEnabled = true
+                    backgroundTranscriptionOnboardingShown = true
+                }
+                Button("Not Now", role: .cancel) {
+                    backgroundTranscriptionOnboardingShown = true
+                }
+            } message: {
+                Text("Podcastle can now transcribe your podcasts in the background, and also provide a summary of the contents. Would you like to enable it?\n\nCaution: this will consume more battery, and you can always disable it later in the More menu.")
+            }
     }
 }
 

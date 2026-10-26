@@ -13,6 +13,7 @@
 		B82725C72A8117EA00F01ABE /* UIExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B82725C62A8117EA00F01ABE /* UIExtensions.swift */; };
 		B82725C92A8D10E300F01ABE /* ProgressViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B82725C82A8D10E300F01ABE /* ProgressViews.swift */; };
 		B84A36972E09930A002B9B8E /* Podcastle.icon in Resources */ = {isa = PBXBuildFile; fileRef = B84A36962E09930A002B9B8E /* Podcastle.icon */; };
+		A1C0DE012F00000000000002 /* PodcastleIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0DE012F00000000000001 /* PodcastleIntents.swift */; };
 		B85143682A3116B0003ED322 /* PodcastleApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85143672A3116B0003ED322 /* PodcastleApp.swift */; };
 		B851436A2A3116B0003ED322 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B85143692A3116B0003ED322 /* MainView.swift */; };
 		B851436C2A3116B1003ED322 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B851436B2A3116B1003ED322 /* Assets.xcassets */; };
@@ -53,6 +54,7 @@
 		B82AB0592D47FA2B003F3B71 /* Podcastle.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Podcastle.entitlements; sourceTree = "<group>"; };
 		B84A36962E09930A002B9B8E /* Podcastle.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Podcastle.icon; sourceTree = "<group>"; };
 		B85143642A3116B0003ED322 /* Podcastle.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Podcastle.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1C0DE012F00000000000001 /* PodcastleIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastleIntents.swift; sourceTree = "<group>"; };
 		B85143672A3116B0003ED322 /* PodcastleApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PodcastleApp.swift; sourceTree = "<group>"; };
 		B85143692A3116B0003ED322 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		B851436B2A3116B1003ED322 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -133,6 +135,7 @@
 				B82AB0592D47FA2B003F3B71 /* Podcastle.entitlements */,
 				B851437B2A3B460C003ED322 /* Info.plist */,
 				B85143672A3116B0003ED322 /* PodcastleApp.swift */,
+				A1C0DE012F00000000000001 /* PodcastleIntents.swift */,
 				B89D862B2DE6244200732403 /* View */,
 				B89D862A2DE6242A00732403 /* TipJar */,
 				B8752DEC2DD3453800189AAC /* Transcriber */,
@@ -334,6 +337,7 @@
 				B851437A2A3A2FE9003ED322 /* Player.swift in Sources */,
 				B8752DEE2DD3B8CF00189AAC /* OnboardView.swift in Sources */,
 				B85143682A3116B0003ED322 /* PodcastleApp.swift in Sources */,
+				A1C0DE012F00000000000002 /* PodcastleIntents.swift in Sources */,
 				B82725C92A8D10E300F01ABE /* ProgressViews.swift in Sources */,
 				B851437F2A3D0083003ED322 /* SearchView.swift in Sources */,
 				B8CAFE022E1234AB00CAFE02 /* CarPlayController.swift in Sources */,
@@ -472,7 +476,7 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -489,7 +493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -512,7 +516,7 @@
 				CODE_SIGN_ENTITLEMENTS = Podcastle/Podcastle.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Podcastle/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -529,7 +533,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mobytestudio.VoiceFeed;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";

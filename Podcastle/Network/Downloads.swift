@@ -93,10 +93,7 @@ struct Download {
     }
 }
 
-// Handles URLSessionDownloadDelegate callbacks on behalf of the Downloads actor.
-// Kept as a separate NSObject subclass so delegate calls arrive on the URLSession's
-// own serial queue without needing actor-hop overhead.
-// Thread-safety for shared mutable state is provided by a single NSLock.
+// URLSessionDownloadDelegate for the Downloads actor; shared state is guarded by `lock`.
 private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
     private let lock = NSLock()
@@ -126,11 +123,6 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
     }
 
     // MARK: - Destination persistence (survives app kill / restart)
-    //
-    // register() writes from the Downloads actor's thread while the delegate methods below
-    // read/remove from the URLSession's own serial delegate queue — a different thread. All
-    // access to the shared "bgDownloads" dictionary goes through `lock` so concurrent
-    // downloads can't race and drop each other's persisted mapping.
 
     private func persistDestination(_ path: String, for taskID: Int) {
         lock.withLock {
@@ -170,9 +162,7 @@ private final class BackgroundDownloadDelegate: NSObject, URLSessionDownloadDele
         // Fall back to the persisted map when the app was woken from a kill
         let finalDest = destination ?? loadPersistedDestination(for: taskID)
 
-        // Reject non-2xx responses (error pages, auth walls, etc.) instead of silently
-        // saving them as if they were the episode audio — mirrors the check the
-        // foreground download(for:) path already performs.
+        // Don't save error pages as episode audio.
         let statusCode = (downloadTask.response as? HTTPURLResponse)?.statusCode
         let responseOK = statusCode.map { (200..<300).contains($0) } ?? false
 
@@ -276,9 +266,8 @@ actor Downloads: NSObject, ObservableObject, Sendable {
         }
     }
 
-    // Called by AppDelegate.handleEventsForBackgroundURLSession.
-    // Reconnects to the background session so iOS can deliver pending completion events,
-    // then calls the system handler once all events have been processed.
+    // Called by AppDelegate.handleEventsForBackgroundURLSession: reconnects to the
+    // session, then calls the system handler once all events are processed.
     func setBackgroundCompletionHandler(_ handler: @escaping () -> Void) {
         bgDelegate.onAllEventsDelivered = handler
         _ = makeBackgroundSession()  // Ensure session exists to receive pending events

@@ -68,9 +68,7 @@ extension UIColor {
             alpha: &alpha
         )
         
-        // Create a new UIColor modifying each component
-        // by componentDelta, making the new UIColor either
-        // lighter or darker.
+        // Lighten or darken each component by componentDelta.
         return UIColor(
             red: add(componentDelta, toComponent: red),
             green: add(componentDelta, toComponent: green),

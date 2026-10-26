@@ -31,6 +31,8 @@ import Foundation
 import SwiftData
 import CryptoKit
 import AVFoundation
+import AudioToolbox
+import os
 
 @Model public final class Episode:Sendable {
     var artwork:    String = ""
@@ -154,25 +156,37 @@ import AVFoundation
         }
     }
     
-    // This function is Sync to avoid the new .load
+    // Length of the downloaded file, for episodes whose feed gave no duration.
     func podcastDuration() -> Double {
-        var sizeInSeconds = 0.0
-        
-        if let fullPath = fullLocalUrl(.audio) {
-            if FileManager.default.fileExists(atPath: fullPath.path()) {
-                do {
-                    let audioFile = try AVAudioFile(forReading: fullPath)
-                    let audioFormat = audioFile.processingFormat
-                    let frameCount = audioFile.length
-                    let sampleRate = Double(audioFormat.sampleRate)
-                    
-                    sizeInSeconds = Double(frameCount) / sampleRate
-                } catch {
-                    print("Error determining podcast duration: \(error)")
-                }
-            }
-        }
-        
-        return sizeInSeconds
+        guard let url = fullLocalUrl(.audio) else { return 0 }
+        return AudioDuration.estimate(url)
+    }
+}
+
+enum AudioDuration {
+    private static let cache = OSAllocatedUnfairLock(initialState: [String: (size: UInt64, seconds: Double)]())
+
+    /// Seconds of audio in a local file, or 0 if it's missing or unreadable.
+    ///
+    /// Read from the file header and bitrate, so it's instant. Don't use AVAudioFile.length:
+    /// for an MP3 without a frame-count header it reads the whole file, which took over 10s
+    /// on the main thread and got the app killed by the launch watchdog. The estimate is
+    /// exact for CBR files and VBR files with a header (most podcasts); for a VBR file
+    /// without one it can be off by 20% or more, the same estimate AVPlayer shows.
+    static func estimate(_ url: URL) -> Double {
+        let path = url.path
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? UInt64 else { return 0 }
+        if let cached = cache.withLock({ $0[path] }), cached.size == size { return cached.seconds }
+
+        var fileID: AudioFileID?
+        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr, let fileID else { return 0 }
+        defer { AudioFileClose(fileID) }
+        var seconds: Float64 = 0
+        var propertySize = UInt32(MemoryLayout<Float64>.size)
+        guard AudioFileGetProperty(fileID, kAudioFilePropertyEstimatedDuration, &propertySize, &seconds) == noErr,
+              seconds.isFinite, seconds > 0 else { return 0 }
+
+        cache.withLock { $0[path] = (size, seconds) }
+        return seconds
     }
 }

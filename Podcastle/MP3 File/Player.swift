@@ -46,13 +46,8 @@ import SwiftData
     var isPlaying:Bool = false
     var title:String = ""
     var image:UIImage? = nil
-    // The artwork last published to Now Playing, and what it was built from (the
-    // chapter image, or the episode's cover file). setupNowPlaying rebuilds the
-    // whole info dictionary on every play — without reusing this, an episode
-    // with no chapter image went out with no artwork until the cover was
-    // reloaded from disk, which flashed the lock screen artwork away and back.
-    // Reusing the same MPMediaItemArtwork object also spares the lock screen a
-    // redraw when nothing actually changed.
+    // The artwork last sent to Now Playing and its source, reused so the lock screen
+    // artwork doesn't flash when setupNowPlaying rebuilds the info.
     private var nowPlayingArtwork:MPMediaItemArtwork?
     private var nowPlayingArtworkSource:AnyHashable?
     var secondsLeft:Double = 0.0
@@ -65,13 +60,8 @@ import SwiftData
     // Helper Objects
     private let audioPlayer = AVPlayer()
     private var isAudioSessionActive = false
-    // play() flips this synchronously before kicking off activateAudioSession's
-    // async completion — isAudioSessionActive itself only becomes true inside
-    // that completion, so without a separate synchronous guard, a second play()
-    // landing before the first one's activation finishes (a fast double-tap, or
-    // a remote-command-center Play racing a UI tap) would also see
-    // isAudioSessionActive == false and kick off a second concurrent
-    // activation + beginPlayback() for what was really one user action.
+    // Set synchronously in play() so a second play() during async session activation
+    // doesn't start playback twice.
     private var isActivatingAudioSession = false
     private var seekInProgress = false
     private var shouldPlayAfterSeek = false
@@ -123,7 +113,9 @@ import SwiftData
         Task {
             // Delay just enough for view tree to be complete and trigger the setPodcast change
             try? await Task.sleep(nanoseconds: 2_000_000)
-            if let p = UserDefaults.standard.object(forKey: "currentPodcast") {
+            // Skipped if something already loaded an episode in the meantime — a
+            // Siri intent on a cold launch — so it isn't swapped back out mid-play.
+            if self.currentPodcast == nil, let p = UserDefaults.standard.object(forKey: "currentPodcast") {
                 if let lastPodcast = await subscriptions?.findEpisode(p as! String) {
                     _ = setPodcast(lastPodcast)
                 }
@@ -175,11 +167,17 @@ import SwiftData
         return true
     }
 
-    // "Continue Playing" (More menu, on by default) — when an episode finishes
-    // naturally, auto-advance to the most recent downloaded episode that isn't
-    // played yet, instead of just stopping. Falls back to pausing, same as
-    // before this existed, if it's off or there's nothing left to play.
+    // "Continue Playing": when an episode ends, play the newest unplayed one, else pause.
     func handlePlaybackEnded() async {
+        // The file's real length is known now. Saving it keeps a finished episode "Played"
+        // when the feed gave no duration and the file's estimate is too long.
+        if let currentPodcast, currentPodcast.duration == 0 {
+            let end = audioPlayer.currentTime().seconds
+            if end.isFinite && end > 0 {
+                currentPodcast.duration = end
+                _ = await subscriptions?.save()
+            }
+        }
         guard UserDefaults.standard.bool(forKey: kContinuePlayingEnabledKey),
               let subscriptions,
               let next = await subscriptions.mostRecentUnplayedDownloadedEpisode(excluding: currentPodcast) else {
@@ -306,11 +304,7 @@ import SwiftData
                     n = d
                 }
             }
-            // seekInProgress (checked by addPeriodicTimeObserver below) stops the
-            // 1s-interval observer from clobbering this with a stale pre-seek
-            // reading before AVPlayer's seek actually lands — without it, the
-            // progress bar would visibly jump back to the old position for a tick
-            // before correcting itself to n.
+            // Stops the periodic observer from reporting the pre-seek time until the seek lands.
             seekInProgress = true
             progress = n
             playbackProgress.value = n
@@ -334,6 +328,15 @@ import SwiftData
         progress = 0.0
         seek(seconds)
     }
+
+    // Tapping a chapter jumps to it and plays from there. play() called while
+    // the seek is still in flight is deferred until it lands (shouldPlayAfterSeek).
+    func playChapter(_ chapter:ID3V2Frame) {
+        absoluteSeek(Double(chapter.startTime) / 1000.0)
+        if !isPlaying {
+            play()
+        }
+    }
     
     func addPeriodicTimeObserver() {
         // Invoke callback every second
@@ -347,11 +350,7 @@ import SwiftData
                 // Cohalesce multiple variables update with this send
                 // self.objectWillChange.send()
 
-                // A seek() is already showing its own target position optimistically
-                // (and will clear this itself once AVPlayer confirms it landed) — a
-                // periodic tick landing in between would otherwise report a stale
-                // pre-seek time and visibly snap the progress bar backward for a
-                // moment before the next tick corrected it.
+                // A seek is in flight; its stale time would make the progress bar jump back.
                 guard !self.seekInProgress else { return }
 
                 // Update chapter information
@@ -499,9 +498,7 @@ import SwiftData
         return currentPodcast?.fullLocalUrl(.artwork)
     }
 
-    // Artwork that's available without disk I/O — the cached one if its source
-    // hasn't changed, or one built from the in-memory chapter image. nil means
-    // the episode cover still has to be loaded (see loadNowPlayingArtwork).
+    // Artwork available without disk I/O; nil means the cover must be loaded first.
     private func readyNowPlayingArtwork() -> MPMediaItemArtwork? {
         let source = nowPlayingArtworkSourceKey
         if let nowPlayingArtwork, source != nil, nowPlayingArtworkSource == source {
@@ -645,10 +642,7 @@ import SwiftData
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }
 
-    // AVAudioSession.setActive(true) is a synchronous, potentially slow call — doing it on the
-    // main thread trips AVAudioSession_iOS's "can lead to UI unresponsiveness" runtime warning.
-    // iOS 27 added a genuinely async activate(options:completionHandler:); on older OS versions
-    // there is no non-blocking alternative, so the old call is pushed to a background thread instead.
+    // setActive(true) blocks, so use iOS 27's async activate, or a background thread before it.
     private func activateAudioSession(completion: @escaping (Bool) -> Void) {
         if #available(iOS 27.0, *) {
             AVAudioSession.sharedInstance().activate(options: []) { activated, error in

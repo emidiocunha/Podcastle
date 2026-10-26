@@ -30,10 +30,7 @@
 import Foundation
 import AVFoundation
 
-// Reads a podcast's summary aloud with on-device text-to-speech, for the "Play"
-// button next to the Summary card. Deliberately tiny and single-purpose: it knows
-// nothing about Transcriber or the episode, just how to speak (and stop speaking)
-// a piece of text.
+// Reads an episode summary aloud with on-device text-to-speech.
 @MainActor final class SummarySpeaker: NSObject, ObservableObject {
     @Published private(set) var isSpeaking = false
     private let synthesizer = AVSpeechSynthesizer()
@@ -43,10 +40,7 @@ import AVFoundation
         synthesizer.delegate = self
     }
 
-    // Starts speaking `text` in a voice matching `language` (Transcriber's detected
-    // episode language, e.g. "pt" or "en_US" — the same code used to pick the
-    // transcription locale and, now, the summarization language), or stops if
-    // already speaking.
+    // Speaks `text` in a voice for `language` (e.g. "pt" or "en_US"), or stops if speaking.
     func toggle(_ text: String, language: String) {
         if synthesizer.isSpeaking {
             stop()
@@ -64,11 +58,8 @@ import AVFoundation
         isSpeaking = false
     }
 
-    // AVSpeechSynthesisVoice expects a full BCP 47 code (e.g. "pt-PT"), but the
-    // detected language is often just a bare ISO code (e.g. "pt") with no region.
-    // Matches it against the installed voices' own language codes rather than
-    // guessing a region, falling back to the device's own language if nothing
-    // installed matches at all.
+    // Matches a bare language code (e.g. "pt") to an installed voice, falling back to
+    // the device's language.
     private static func voice(for language: String) -> AVSpeechSynthesisVoice? {
         let bare = language.split(separator: "_").first.map(String.init) ?? language
         let installed = AVSpeechSynthesisVoice.speechVoices().map(\.language)
